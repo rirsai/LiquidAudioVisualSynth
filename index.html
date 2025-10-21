@@ -22,35 +22,89 @@
             left: 20px;
             z-index: 100;
         }
-        button {
-            background: rgba(255, 255, 255, 0.9);
+        
+        #audioPanel {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.9);
+            border-radius: 50px;
+            padding: 14px 28px;
+            display: flex;
+            align-items: center;
+            gap: 0;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        #audioPanel.expanded {
+            gap: 20px;
+        }
+        
+        #toggleAudio {
+            background: transparent;
             border: none;
-            color: #000;
-            padding: 8px 16px;
-            font-size: 13px;
+            color: white;
+            font-size: 14px;
             cursor: pointer;
-            border-radius: 4px;
             font-weight: 500;
             transition: all 0.2s;
+            white-space: nowrap;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
         }
-        button:hover {
-            background: rgba(255, 255, 255, 1);
-            transform: translateY(-1px);
+        
+        #toggleAudio:hover {
+            opacity: 0.7;
         }
-        button.active {
-            background: rgba(0, 0, 0, 0.9);
-            color: white;
+        
+        #colorPalette {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            opacity: 0;
+            width: 0;
+            overflow: visible;
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            padding: 4px 0;
         }
-        button.active:hover {
-            background: rgba(0, 0, 0, 1);
+        
+        #colorPalette.visible {
+            opacity: 1;
+            width: auto;
+        }
+        
+        .color-swatch {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+            flex-shrink: 0;
+        }
+        
+        .color-swatch:hover {
+            transform: scale(1.15);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+        }
+        
+        .color-swatch.selected {
+            border-color: white;
+            border-width: 3px;
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.8), 0 0 20px rgba(255, 255, 255, 0.5);
+            transform: scale(1.15);
         }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
     <div id="controls">
-        <button id="toggleAudio">Audio Off</button>
+        <div id="audioPanel">
+            <button id="toggleAudio">Sound On</button>
+            <div id="colorPalette"></div>
+        </div>
     </div>
+    
     <script>
         const canvas = document.getElementById('canvas');
         const gl = canvas.getContext('webgl', {
@@ -81,6 +135,160 @@
         resize();
         window.addEventListener('resize', resize);
 
+        // COLOR VOICE SYSTEM with persistence
+        const colorVoices = [
+            {
+                color: { r: 0.4, g: 0.4, b: 0.4 },
+                hex: '#666666',
+                persistence: 0.8,
+                diffusion: 0.3,
+                sound: {
+                    waveform: 'sine',
+                    baseFreqMultiplier: 0.5,
+                    harmonics: 1,
+                    attack: 0.2,
+                    filterType: 'lowpass',
+                    filterFreq: 400,
+                    filterQ: 1,
+                    reverbMix: 0.8,
+                    detune: 0
+                }
+            },
+            {
+                color: { r: 0.7, g: 0.4, b: 0.3 },
+                hex: '#B36A49',
+                persistence: 0.7,
+                diffusion: 0.4,
+                sound: {
+                    waveform: 'triangle',
+                    baseFreqMultiplier: 1.0,
+                    harmonics: 5,
+                    attack: 0.08,
+                    filterType: 'bandpass',
+                    filterFreq: 800,
+                    filterQ: 8,
+                    reverbMix: 0.6,
+                    detune: 8,
+                    useNoise: true
+                }
+            },
+            {
+                color: { r: 0.3, g: 0.4, b: 0.9 },
+                hex: '#4D5DE8',
+                persistence: 1.0,
+                diffusion: 0.25,
+                sound: {
+                    waveform: 'sine',
+                    baseFreqMultiplier: 0.5,
+                    harmonics: 3,
+                    attack: 0.3,
+                    filterType: 'lowpass',
+                    filterFreq: 500,
+                    filterQ: 2,
+                    reverbMix: 0.85,
+                    detune: 12,
+                    useModulation: true,
+                    modulationRate: 0.3,
+                    modulationDepth: 15
+                }
+            },
+            {
+                color: { r: 0.85, g: 0.9, b: 0.3 },
+                hex: '#D9E64D',
+                persistence: 0.4,
+                diffusion: 0.6,
+                sound: {
+                    waveform: 'sawtooth',
+                    baseFreqMultiplier: 6.0,
+                    harmonics: 10,
+                    attack: 0.02,
+                    filterType: 'highpass',
+                    filterFreq: 2500,
+                    filterQ: 4,
+                    reverbMix: 0.3,
+                    detune: 40
+                }
+            },
+            {
+                color: { r: 0.2, g: 0.8, b: 0.4 },
+                hex: '#33CC66',
+                persistence: 0.8,
+                diffusion: 0.35,
+                sound: {
+                    waveform: 'triangle',
+                    baseFreqMultiplier: 2.5,
+                    harmonics: 4,
+                    attack: 0.15,
+                    filterType: 'bandpass',
+                    filterFreq: 1500,
+                    filterQ: 2.5,
+                    reverbMix: 0.75,
+                    detune: 15
+                }
+            },
+            {
+                color: { r: 0.95, g: 0.6, b: 0.7 },
+                hex: '#F299B3',
+                persistence: 1.0,
+                diffusion: 0.3,
+                sound: {
+                    waveform: 'sine',
+                    baseFreqMultiplier: 4.0,
+                    harmonics: 2,
+                    attack: 0.4,
+                    filterType: 'lowpass',
+                    filterFreq: 3500,
+                    filterQ: 0.7,
+                    reverbMix: 0.9,
+                    detune: 5
+                }
+            },
+            {
+                color: { r: 1.0, g: 0.4, b: 0.35 },
+                hex: '#FF6659',
+                persistence: 0.5,
+                diffusion: 0.5,
+                sound: {
+                    waveform: 'square',
+                    baseFreqMultiplier: 1.5,
+                    harmonics: 7,
+                    attack: 0.05,
+                    filterType: 'bandpass',
+                    filterFreq: 1000,
+                    filterQ: 6,
+                    reverbMix: 0.5,
+                    detune: 25
+                }
+            }
+        ];
+
+        let selectedColorIndex = -1;
+        let currentDynamicColor = { r: 0.56, g: 0.57, b: 0.62 };
+        let currentDiffusion = 0.3;
+
+        function initColorPalette() {
+            const palette = document.getElementById('colorPalette');
+            colorVoices.forEach((voice, index) => {
+                const swatch = document.createElement('div');
+                swatch.className = 'color-swatch';
+                swatch.style.background = voice.hex;
+                swatch.title = `Color voice ${index + 1}`;
+                swatch.addEventListener('click', () => selectColor(index));
+                palette.appendChild(swatch);
+            });
+        }
+
+        function selectColor(index) {
+            selectedColorIndex = index;
+            document.querySelectorAll('.color-swatch').forEach((swatch, i) => {
+                swatch.classList.toggle('selected', i === index);
+            });
+            
+            const voice = colorVoices[index];
+            currentDynamicColor = voice.color;
+            currentDiffusion = voice.diffusion;
+        }
+
         const vertexShaderSource = `
             attribute vec2 position;
             varying vec2 vUv;
@@ -102,6 +310,29 @@
             void main() {
                 vec2 coord = vUv - dt * texture2D(uVelocity, vUv).xy * texelSize;
                 gl_FragColor = dissipation * texture2D(uSource, coord);
+            }
+        `;
+
+        const diffusionShaderSource = `
+            precision mediump float;
+            uniform sampler2D uSource;
+            uniform vec2 texelSize;
+            uniform float diffusionRate;
+            varying vec2 vUv;
+            
+            void main() {
+                // Diffusion creates organic spreading like ink in water
+                vec3 center = texture2D(uSource, vUv).rgb;
+                vec3 left = texture2D(uSource, vUv - vec2(texelSize.x, 0.0)).rgb;
+                vec3 right = texture2D(uSource, vUv + vec2(texelSize.x, 0.0)).rgb;
+                vec3 top = texture2D(uSource, vUv + vec2(0.0, texelSize.y)).rgb;
+                vec3 bottom = texture2D(uSource, vUv - vec2(0.0, texelSize.y)).rgb;
+                
+                // Laplacian diffusion - creates natural spreading
+                vec3 laplacian = left + right + top + bottom - 4.0 * center;
+                vec3 diffused = center + laplacian * diffusionRate;
+                
+                gl_FragColor = vec4(diffused, 1.0);
             }
         `;
 
@@ -180,9 +411,39 @@
             }
         `;
 
+        const colorSplatShaderSource = `
+            precision mediump float;
+            uniform sampler2D uTarget;
+            uniform float aspectRatio;
+            uniform vec2 point;
+            uniform vec3 color;
+            uniform float radius;
+            varying vec2 vUv;
+            
+            void main() {
+                vec2 p = vUv - point;
+                p.x *= aspectRatio;
+                
+                float dist = length(p);
+                
+                // Concentrated ink drop - small, intense center
+                float intensity = exp(-dist * dist / (radius * 0.3));
+                
+                vec3 splat = color * intensity;
+                vec4 base = texture2D(uTarget, vUv);
+                
+                // Add ink drop
+                vec3 newColor = base.rgb + splat;
+                newColor = clamp(newColor, 0.0, 1.0);
+                
+                gl_FragColor = vec4(newColor, 1.0);
+            }
+        `;
+
         const displayShaderSource = `
             precision mediump float;
             uniform sampler2D uVelocity;
+            uniform sampler2D uColor;
             uniform float time;
             uniform vec2 resolution;
             varying vec2 vUv;
@@ -192,10 +453,10 @@
             const vec4 a = vec4(4.5, 6.0, 8.0, 11.0);
             const vec2 b = vec2(1.0, 1.0);
             
-            const vec3 color1 = vec3(0.95);
-            const vec3 color2 = vec3(0.66, 0.67, 0.70);
-            const vec3 color3 = vec3(0.35, 0.37, 0.42);
-            const vec3 color4 = vec3(0.56, 0.57, 0.62);
+            const vec3 baseColor1 = vec3(0.95);
+            const vec3 baseColor2 = vec3(0.66, 0.67, 0.70);
+            const vec3 baseColor3 = vec3(0.35, 0.37, 0.42);
+            const vec3 baseColor4 = vec3(0.56, 0.57, 0.62);
             
             float cheapNoise(vec3 p) {
                 float s1 = sin(p.z + p.x * a.x + cos(p.x * a.x - p.z));
@@ -210,6 +471,9 @@
                 vec2 st = vUv * aR * scale;
                 
                 vec2 velocity = texture2D(uVelocity, vUv).xy;
+                vec3 inkColor = texture2D(uColor, vUv).rgb;
+                float inkPresence = length(inkColor);
+                
                 vec2 fluidDistortion = velocity * 3.0;
                 
                 float t = time * 0.008;
@@ -232,18 +496,37 @@
                 );
                 
                 float n = 0.5 + 0.5 * cheapNoise(vec3(st + v2 + fluidDistortion * 0.2, 0.0));
-                
                 float nn = n * n;
-                vec3 color = mix(color1, color2, clamp(nn * 8.0, 0.0, 1.0));
-                color = mix(color, color3, clamp(length(v1), 0.0, 1.0));
-                color = mix(color, color4, clamp(length(v2.x), 0.0, 1.0));
+                
+                // Generate base metallic grey
+                vec3 metallic = mix(baseColor1, baseColor2, clamp(nn * 8.0, 0.0, 1.0));
+                metallic = mix(metallic, baseColor3, clamp(length(v1), 0.0, 1.0));
+                metallic = mix(metallic, baseColor4, clamp(length(v2.x), 0.0, 1.0));
                 
                 float velocityMag = length(velocity);
-                color += vec3(0.2) * velocityMag;
+                metallic += vec3(0.2) * velocityMag;
+                metallic /= nn + n * 7.0;
                 
-                color /= nn + n * 7.0;
+                // Where ink is present, it colors the metallic liquid
+                if (inkPresence > 0.05) {
+                    // Normalize ink to get hue
+                    vec3 inkHue = inkPresence > 0.0 ? inkColor / inkPresence : vec3(0.0);
+                    
+                    // Extract metallic luminosity structure
+                    float lum = dot(metallic, vec3(0.299, 0.587, 0.114));
+                    
+                    // Tint the metallic with ink hue, preserving structure
+                    vec3 tintedMetallic = inkHue * lum * 1.2;
+                    
+                    // Nearly full replacement - very opaque
+                    float blend = smoothstep(0.05, 0.3, inkPresence) * 0.95;
+                    metallic = mix(metallic, tintedMetallic, blend);
+                }
                 
-                gl_FragColor = vec4(color, 1.0);
+                // Prevent extreme whites
+                metallic = clamp(metallic, 0.0, 0.7);
+                
+                gl_FragColor = vec4(metallic, 1.0);
             }
         `;
 
@@ -277,10 +560,12 @@
         }
 
         const advectionProgram = createProgram(vertexShaderSource, advectionShaderSource);
+        const diffusionProgram = createProgram(vertexShaderSource, diffusionShaderSource);
         const divergenceProgram = createProgram(vertexShaderSource, divergenceShaderSource);
         const pressureProgram = createProgram(vertexShaderSource, pressureShaderSource);
         const gradientSubtractProgram = createProgram(vertexShaderSource, gradientSubtractShaderSource);
         const splatProgram = createProgram(vertexShaderSource, splatShaderSource);
+        const colorSplatProgram = createProgram(vertexShaderSource, colorSplatShaderSource);
         const displayProgram = createProgram(vertexShaderSource, displayShaderSource);
 
         const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
@@ -322,6 +607,17 @@
         const velocity = createDoubleFBO(simWidth, simHeight);
         const divergence = createFramebuffer(simWidth, simHeight);
         const pressure = createDoubleFBO(simWidth, simHeight);
+        const colorBuffer = createDoubleFBO(simWidth, simHeight);
+
+        // Initialize color buffer to completely empty
+        gl.viewport(0, 0, simWidth, simHeight);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, colorBuffer.read.fbo);
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, colorBuffer.write.fbo);
+        gl.clearColor(0.0, 0.0, 0.0, 0.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
         // Mouse and interaction state
         let mouseX = 0.5;
@@ -351,6 +647,7 @@
             const rect = canvas.getBoundingClientRect();
             const clickX = e.clientX / rect.width;
             const clickY = 1.0 - e.clientY / rect.height;
+            
             pendingClicks.push({ x: clickX, y: clickY });
             
             if (audioEnabled) {
@@ -370,6 +667,7 @@
             const rect = canvas.getBoundingClientRect();
             const clickX = e.touches[0].clientX / rect.width;
             const clickY = 1.0 - e.touches[0].clientY / rect.height;
+            
             pendingClicks.push({ x: clickX, y: clickY });
             
             if (audioEnabled) {
@@ -391,6 +689,7 @@
         let lastSoundTime = 0;
         let rootDrone, rootGain;
         let echoTone, echoGain, echoFilter;
+        let lastColorIntensity = 0;
         
         const SCALE = [
             73.42, 87.31, 98.00, 110.00, 130.81,
@@ -466,6 +765,140 @@
             return SCALE[Math.max(0, Math.min(SCALE.length - 1, scaleIndex))];
         }
 
+        // COLOR VOICE AUDIO TRIGGER
+        function triggerColorVoice(voiceIndex, x, y, colorIntensity) {
+            const voice = colorVoices[voiceIndex];
+            const sound = voice.sound;
+            const now = audioContext.currentTime;
+            
+            const baseFreq = quantizePitch(y) * sound.baseFreqMultiplier;
+            const visualFadeTime = 5.0 * voice.persistence;
+            const soundRelease = visualFadeTime * 0.8;
+            const duration = sound.attack + soundRelease;
+            
+            const safeIntensity = Math.max(0, Math.min(colorIntensity || 0, 1.0));
+            const baseVolume = 0.04 * Math.min(safeIntensity * 3, 1.0);
+            
+            if (!isFinite(baseVolume) || !isFinite(duration) || baseVolume <= 0) {
+                return;
+            }
+            
+            const osc = audioContext.createOscillator();
+            osc.type = sound.waveform;
+            osc.frequency.value = baseFreq;
+            
+            if (sound.detune) {
+                osc.detune.value = (Math.random() - 0.5) * sound.detune;
+            }
+            
+            if (sound.useModulation) {
+                const lfo = audioContext.createOscillator();
+                lfo.frequency.value = sound.modulationRate;
+                const lfoGain = audioContext.createGain();
+                lfoGain.gain.value = sound.modulationDepth;
+                lfo.connect(lfoGain);
+                lfoGain.connect(osc.frequency);
+                lfo.start(now);
+                lfo.stop(now + duration);
+            }
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(baseVolume, now + sound.attack);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            let noiseNode = null;
+            let noiseEnv = null;
+            if (sound.useNoise) {
+                const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.2, audioContext.sampleRate);
+                const noiseData = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < noiseData.length; i++) {
+                    noiseData[i] = Math.random() * 2 - 1;
+                }
+                noiseNode = audioContext.createBufferSource();
+                noiseNode.buffer = noiseBuffer;
+                noiseNode.loop = true;
+                
+                const noiseFilter = audioContext.createBiquadFilter();
+                noiseFilter.type = 'bandpass';
+                noiseFilter.frequency.value = sound.filterFreq;
+                noiseFilter.Q.value = 2;
+                
+                noiseEnv = audioContext.createGain();
+                noiseEnv.gain.value = 0;
+                const noiseVol = baseVolume * 0.4;
+                noiseEnv.gain.linearRampToValueAtTime(noiseVol, now + sound.attack);
+                noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                
+                noiseNode.connect(noiseFilter);
+                noiseFilter.connect(noiseEnv);
+            }
+            
+            const harmonics = [];
+            for (let i = 1; i <= sound.harmonics; i++) {
+                const harmOsc = audioContext.createOscillator();
+                harmOsc.type = 'sine';
+                
+                const ratio = i + 1 + (Math.random() * 0.5);
+                harmOsc.frequency.value = baseFreq * ratio;
+                
+                if (sound.detune) {
+                    harmOsc.detune.value = (Math.random() - 0.5) * sound.detune * 0.5;
+                }
+                
+                const harmEnv = audioContext.createGain();
+                harmEnv.gain.value = 0;
+                const harmAmp = baseVolume * 0.5 / (i + 1);
+                harmEnv.gain.linearRampToValueAtTime(harmAmp, now + sound.attack);
+                harmEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                
+                harmOsc.connect(harmEnv);
+                harmonics.push({ osc: harmOsc, env: harmEnv });
+            }
+            
+            const filter = audioContext.createBiquadFilter();
+            filter.type = sound.filterType;
+            filter.frequency.value = sound.filterFreq;
+            filter.Q.value = sound.filterQ;
+            
+            filter.frequency.linearRampToValueAtTime(sound.filterFreq * 1.5, now + duration * 0.3);
+            filter.frequency.linearRampToValueAtTime(sound.filterFreq * 0.8, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2));
+            
+            const dryGain = audioContext.createGain();
+            const wetGain = audioContext.createGain();
+            dryGain.gain.value = 1 - (sound.reverbMix || 0.5);
+            wetGain.gain.value = sound.reverbMix || 0.5;
+            
+            osc.connect(env);
+            harmonics.forEach(h => h.env.connect(filter));
+            env.connect(filter);
+            
+            if (noiseEnv) {
+                noiseEnv.connect(filter);
+            }
+            
+            filter.connect(panner);
+            panner.connect(dryGain);
+            panner.connect(wetGain);
+            
+            dryGain.connect(masterGain);
+            wetGain.connect(convolver);
+            
+            osc.start(now);
+            osc.stop(now + duration);
+            if (noiseNode) {
+                noiseNode.start(now);
+                noiseNode.stop(now + duration);
+            }
+            harmonics.forEach(h => {
+                h.osc.start(now);
+                h.osc.stop(now + duration);
+            });
+        }
+
         function createMovementSound(velocity, direction, complexity, turbulenceLevel, accel) {
             const now = audioContext.currentTime;
             const baseFreq = quantizePitch(mouseY);
@@ -476,11 +909,8 @@
             const duration = 0.4 + Math.min(velocityMag * 2, 2.0);
             const velocityCurve = Math.pow(velocityMag, 1.5);
             
-            // Acceleration affects volume
             const accelBoost = 1 + Math.max(-0.4, Math.min(0.6, accel * 3));
-            // Gentle boost for higher pitches (top of screen)
-            const pitchBoost = 1 + (mouseY * 0.15);
-            const baseAmplitude = (0.04 + velocityCurve * 0.15) * (1 + complexity * 0.4) * pitchBoost;
+            const baseAmplitude = (0.03 + velocityCurve * 0.15) * (1 + complexity * 0.4);
             const amplitude = baseAmplitude * accelBoost;
             
             const attackTime = accel > 0.1 ? 0.04 : 0.08;
@@ -921,19 +1351,30 @@
         }
         
         window.addEventListener('DOMContentLoaded', function() {
+            initColorPalette();
+            
             const toggleBtn = document.getElementById('toggleAudio');
+            const audioPanel = document.getElementById('audioPanel');
+            const colorPalette = document.getElementById('colorPalette');
+            
             if (toggleBtn) {
                 toggleBtn.addEventListener('click', function() {
                     if (!audioEnabled) {
                         initAudio();
-                        this.textContent = 'Audio On';
-                        this.classList.add('active');
+                        this.textContent = 'Sound Off';
+                        audioPanel.classList.add('expanded');
+                        colorPalette.classList.add('visible');
                     } else {
                         audioEnabled = false;
                         if (audioContext) audioContext.close();
                         audioContext = null;
-                        this.textContent = 'Audio Off';
-                        this.classList.remove('active');
+                        this.textContent = 'Sound On';
+                        audioPanel.classList.remove('expanded');
+                        colorPalette.classList.remove('visible');
+                        selectedColorIndex = -1;
+                        document.querySelectorAll('.color-swatch').forEach(swatch => {
+                            swatch.classList.remove('selected');
+                        });
                     }
                 });
             }
@@ -952,6 +1393,7 @@
             
             if (pendingClicks.length > 0) {
                 pendingClicks.forEach(click => {
+                    // Velocity splash
                     gl.useProgram(splatProgram);
                     const posLoc = gl.getAttribLocation(splatProgram, 'position');
                     gl.enableVertexAttribArray(posLoc);
@@ -976,11 +1418,44 @@
                     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
                     
                     velocity.swap();
+                    
+                    // DISABLED: Color ink drop on click (keeping only velocity splash)
+                    // Clicks now only create velocity explosions, not color injection
+                    // Color injection happens only during mouse movement for more realistic effect
+                    /*
+                    if (selectedColorIndex >= 0) {
+                        const voice = colorVoices[selectedColorIndex];
+                        
+                        gl.useProgram(colorSplatProgram);
+                        const colorPosLoc = gl.getAttribLocation(colorSplatProgram, 'position');
+                        gl.enableVertexAttribArray(colorPosLoc);
+                        gl.vertexAttribPointer(colorPosLoc, 2, gl.FLOAT, false, 0, 0);
+                        
+                        bindFramebuffer(colorBuffer.write);
+                        gl.uniform1i(gl.getUniformLocation(colorSplatProgram, 'uTarget'), 0);
+                        gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'aspectRatio'), canvas.width / canvas.height);
+                        gl.uniform2f(gl.getUniformLocation(colorSplatProgram, 'point'), click.x, click.y);
+                        
+                        gl.uniform3f(gl.getUniformLocation(colorSplatProgram, 'color'), 
+                            voice.color.r * 1.2, 
+                            voice.color.g * 1.2, 
+                            voice.color.b * 1.2
+                        );
+                        gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'radius'), 0.003);
+                        
+                        gl.activeTexture(gl.TEXTURE0);
+                        gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
+                        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                        
+                        colorBuffer.swap();
+                    }
+                    */
                 });
                 pendingClicks = [];
             }
             
             if (Math.abs(deltaX) > 0.01 || Math.abs(deltaY) > 0.01) {
+                // Splat velocity
                 gl.useProgram(splatProgram);
                 const posLoc = gl.getAttribLocation(splatProgram, 'position');
                 gl.enableVertexAttribArray(posLoc);
@@ -999,17 +1474,91 @@
                 
                 velocity.swap();
                 
+                // Inject color ink if selected
+                if (selectedColorIndex >= 0) {
+                    const voice = colorVoices[selectedColorIndex];
+                    
+                    gl.useProgram(colorSplatProgram);
+                    const colorPosLoc = gl.getAttribLocation(colorSplatProgram, 'position');
+                    gl.enableVertexAttribArray(colorPosLoc);
+                    gl.vertexAttribPointer(colorPosLoc, 2, gl.FLOAT, false, 0, 0);
+                    
+                    bindFramebuffer(colorBuffer.write);
+                    gl.uniform1i(gl.getUniformLocation(colorSplatProgram, 'uTarget'), 0);
+                    gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'aspectRatio'), canvas.width / canvas.height);
+                    gl.uniform2f(gl.getUniformLocation(colorSplatProgram, 'point'), mouseX, mouseY);
+                    
+                    const injectionStrength = 0.8;
+                    gl.uniform3f(gl.getUniformLocation(colorSplatProgram, 'color'), 
+                        voice.color.r * injectionStrength, 
+                        voice.color.g * injectionStrength, 
+                        voice.color.b * injectionStrength
+                    );
+                    gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'radius'), 0.0015);
+                    
+                    gl.activeTexture(gl.TEXTURE0);
+                    gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
+                    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                    
+                    colorBuffer.swap();
+                    
+                    lastColorIntensity = lastColorIntensity * 0.99 + injectionStrength;
+                    
+                    if (audioEnabled && Date.now() - lastSoundTime > 80) {
+                        triggerColorVoice(selectedColorIndex, mouseX, mouseY, lastColorIntensity);
+                        lastSoundTime = Date.now();
+                    }
+                } else {
+                    lastColorIntensity *= 0.99;
+                }
+                
                 updateAudio();
             }
             
             lastMouseX = mouseX;
             lastMouseY = mouseY;
             
+            // Diffuse color - creates organic watercolor spreading
+            gl.useProgram(diffusionProgram);
+            const diffPosLoc = gl.getAttribLocation(diffusionProgram, 'position');
+            gl.enableVertexAttribArray(diffPosLoc);
+            gl.vertexAttribPointer(diffPosLoc, 2, gl.FLOAT, false, 0, 0);
+            
+            for (let i = 0; i < 3; i++) {
+                bindFramebuffer(colorBuffer.write);
+                gl.uniform1i(gl.getUniformLocation(diffusionProgram, 'uSource'), 0);
+                gl.uniform2f(gl.getUniformLocation(diffusionProgram, 'texelSize'), 1.0 / simWidth, 1.0 / simHeight);
+                gl.uniform1f(gl.getUniformLocation(diffusionProgram, 'diffusionRate'), currentDiffusion * 0.15);
+                
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                
+                colorBuffer.swap();
+            }
+            
+            // Advect color with velocity field
             gl.useProgram(advectionProgram);
             const advPosLoc = gl.getAttribLocation(advectionProgram, 'position');
             gl.enableVertexAttribArray(advPosLoc);
             gl.vertexAttribPointer(advPosLoc, 2, gl.FLOAT, false, 0, 0);
             
+            bindFramebuffer(colorBuffer.write);
+            gl.uniform1i(gl.getUniformLocation(advectionProgram, 'uVelocity'), 0);
+            gl.uniform1i(gl.getUniformLocation(advectionProgram, 'uSource'), 1);
+            gl.uniform2f(gl.getUniformLocation(advectionProgram, 'texelSize'), 1.0 / simWidth, 1.0 / simHeight);
+            gl.uniform1f(gl.getUniformLocation(advectionProgram, 'dt'), dt);
+            gl.uniform1f(gl.getUniformLocation(advectionProgram, 'dissipation'), 0.99);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            colorBuffer.swap();
+            
+            // Advect velocity
             bindFramebuffer(velocity.write);
             gl.uniform1i(gl.getUniformLocation(advectionProgram, 'uVelocity'), 0);
             gl.uniform1i(gl.getUniformLocation(advectionProgram, 'uSource'), 1);
@@ -1089,11 +1638,14 @@
             gl.vertexAttribPointer(dispPosLoc, 2, gl.FLOAT, false, 0, 0);
             
             gl.uniform1i(gl.getUniformLocation(displayProgram, 'uVelocity'), 0);
+            gl.uniform1i(gl.getUniformLocation(displayProgram, 'uColor'), 1);
             gl.uniform1f(gl.getUniformLocation(displayProgram, 'time'), time);
             gl.uniform2f(gl.getUniformLocation(displayProgram, 'resolution'), canvas.width, canvas.height);
             
             gl.activeTexture(gl.TEXTURE0);
             gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
             
             requestAnimationFrame(render);
