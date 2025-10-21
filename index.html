@@ -330,11 +330,16 @@
         let lastMouseY = 0.5;
         let mouseVelX = 0;
         let mouseVelY = 0;
+        let prevVelocityMag = 0;
+        let acceleration = 0;
         let movementMomentum = 0;
         let areaConcentration = 0;
+        let turbulence = 0;
         let recentPositions = [];
+        let recentVelocities = [];
         let pendingClicks = [];
         const MAX_POSITIONS = 20;
+        const MAX_VELOCITIES = 10;
 
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
@@ -381,7 +386,6 @@
         let audioContext = null;
         let audioEnabled = false;
         
-        let activeDrones = [];
         let masterGain;
         let convolver, convolverGain;
         let lastSoundTime = 0;
@@ -462,7 +466,7 @@
             return SCALE[Math.max(0, Math.min(SCALE.length - 1, scaleIndex))];
         }
 
-        function createMovementSound(velocity, direction, complexity) {
+        function createMovementSound(velocity, direction, complexity, turbulenceLevel, accel) {
             const now = audioContext.currentTime;
             const baseFreq = quantizePitch(mouseY);
             const velocityMag = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
@@ -471,7 +475,16 @@
             
             const duration = 0.4 + Math.min(velocityMag * 2, 2.0);
             const velocityCurve = Math.pow(velocityMag, 1.5);
-            const amplitude = (0.03 + velocityCurve * 0.15) * (1 + complexity * 0.4);
+            
+            // Acceleration affects volume
+            const accelBoost = 1 + Math.max(-0.4, Math.min(0.6, accel * 3));
+            // Gentle boost for higher pitches (top of screen)
+            const pitchBoost = 1 + (mouseY * 0.15);
+            const baseAmplitude = (0.04 + velocityCurve * 0.15) * (1 + complexity * 0.4) * pitchBoost;
+            const amplitude = baseAmplitude * accelBoost;
+            
+            const attackTime = accel > 0.1 ? 0.04 : 0.08;
+            const horizontalPos = mouseX;
             
             const fundamental = audioContext.createOscillator();
             fundamental.type = 'sine';
@@ -488,23 +501,38 @@
             
             const fundEnv = audioContext.createGain();
             fundEnv.gain.value = 0;
-            fundEnv.gain.linearRampToValueAtTime(amplitude, now + 0.08);
-            fundEnv.gain.linearRampToValueAtTime(amplitude * 0.8, now + duration * 0.7);
-            fundEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
             
-            const numHarmonics = Math.floor(2 + complexity * 2);
+            if (accel > 0.1) {
+                fundEnv.gain.linearRampToValueAtTime(amplitude * 0.6, now + attackTime);
+                fundEnv.gain.linearRampToValueAtTime(amplitude, now + duration * 0.5);
+                fundEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            } else if (accel < -0.1) {
+                fundEnv.gain.linearRampToValueAtTime(amplitude, now + attackTime);
+                fundEnv.gain.linearRampToValueAtTime(amplitude * 0.4, now + duration * 0.6);
+                fundEnv.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.8);
+            } else {
+                fundEnv.gain.linearRampToValueAtTime(amplitude, now + attackTime);
+                fundEnv.gain.linearRampToValueAtTime(amplitude * 0.8, now + duration * 0.7);
+                fundEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            }
+            
+            const baseNumHarmonics = Math.floor(2 + complexity * 2);
+            const numHarmonics = Math.floor(baseNumHarmonics + horizontalPos * 2);
             const harmonics = [];
-            const harmonicRatios = [1.5, 2, 3, 4];
+            const harmonicRatios = [1.5, 2, 3, 4, 5, 6];
             
             for (let i = 0; i < numHarmonics; i++) {
                 const harmOsc = audioContext.createOscillator();
                 harmOsc.type = 'sine';
-                harmOsc.frequency.value = baseFreq * harmonicRatios[i];
+                
+                const detuning = (Math.random() - 0.5) * turbulenceLevel * 8;
+                harmOsc.frequency.value = baseFreq * harmonicRatios[i] + detuning;
                 
                 const harmEnv = audioContext.createGain();
                 harmEnv.gain.value = 0;
-                const harmAmp = amplitude * (0.2 - i * 0.04) * (1 + complexity * 0.3);
-                harmEnv.gain.linearRampToValueAtTime(harmAmp, now + 0.08);
+                const harmonicBoost = 1 + (horizontalPos * 0.5);
+                const harmAmp = amplitude * (0.2 - i * 0.04) * (1 + complexity * 0.3) * harmonicBoost;
+                harmEnv.gain.linearRampToValueAtTime(harmAmp, now + attackTime);
                 harmEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
                 
                 harmOsc.connect(harmEnv);
@@ -528,15 +556,22 @@
             
             const noiseEnv = audioContext.createGain();
             noiseEnv.gain.value = 0;
-            const noiseAmp = amplitude * 0.3 * velocityCurve * (1 + complexity * 0.5);
+            const noiseAmp = amplitude * 0.3 * velocityCurve * (1 + complexity * 0.5 + turbulenceLevel * 1.5);
             noiseEnv.gain.linearRampToValueAtTime(noiseAmp, now + 0.05);
             noiseEnv.gain.linearRampToValueAtTime(noiseAmp * 0.5, now + duration * 0.5);
             noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
             
             const mainFilter = audioContext.createBiquadFilter();
             mainFilter.type = 'lowpass';
-            mainFilter.frequency.value = baseFreq * (3 + complexity * 2 + velocityCurve * 2) + velocityCurve * 1200;
-            mainFilter.Q.value = 0.7 + complexity * 0.5;
+            const baseFilterFreq = baseFreq * (3 + complexity * 2 + velocityCurve * 2 + turbulenceLevel * 1.5);
+            const horizontalFilterBoost = 1 + (horizontalPos * 2);
+            mainFilter.frequency.value = baseFilterFreq * horizontalFilterBoost + velocityCurve * 1200;
+            mainFilter.Q.value = 0.7 + complexity * 0.5 + turbulenceLevel * 0.8 + (horizontalPos * 0.5);
+            
+            const dryGain = audioContext.createGain();
+            const wetGain = audioContext.createGain();
+            dryGain.gain.value = 1 - (horizontalPos * 0.4);
+            wetGain.gain.value = 0.3 + (horizontalPos * 0.5);
             
             const panner = audioContext.createStereoPanner();
             panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8));
@@ -550,8 +585,11 @@
             noiseEnv.connect(mainFilter);
             
             mainFilter.connect(panner);
-            panner.connect(masterGain);
-            panner.connect(convolver);
+            panner.connect(dryGain);
+            panner.connect(wetGain);
+            
+            dryGain.connect(masterGain);
+            wetGain.connect(convolver);
             
             fundamental.start(now);
             fundamental.stop(now + duration);
@@ -565,6 +603,58 @@
             if (velocityMag > 0.3 && Math.random() < 0.2 + complexity * 0.3) {
                 createAirPuff(velocityMag * (1 + complexity * 0.5));
             }
+        }
+        
+        function createStopAccent(prevVelocity) {
+            const now = audioContext.currentTime;
+            const baseFreq = quantizePitch(mouseY);
+            const duration = 0.15;
+            
+            const osc = audioContext.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = baseFreq;
+            osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.8, now + duration);
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            const accentVolume = Math.min(prevVelocity * 0.15, 0.2);
+            env.gain.linearRampToValueAtTime(accentVolume, now + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.05, audioContext.sampleRate);
+            const noiseData = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noiseData.length; i++) {
+                noiseData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / noiseData.length, 2);
+            }
+            
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            const noiseFilter = audioContext.createBiquadFilter();
+            noiseFilter.type = 'highpass';
+            noiseFilter.frequency.value = baseFreq * 2;
+            noiseFilter.Q.value = 2;
+            
+            const noiseEnv = audioContext.createGain();
+            noiseEnv.gain.value = 0;
+            noiseEnv.gain.linearRampToValueAtTime(accentVolume * 0.3, now + 0.005);
+            noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.5);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8));
+            
+            osc.connect(env);
+            noise.connect(noiseFilter);
+            noiseFilter.connect(noiseEnv);
+            
+            env.connect(panner);
+            noiseEnv.connect(panner);
+            panner.connect(masterGain);
+            panner.connect(convolver);
+            
+            osc.start(now);
+            osc.stop(now + duration);
+            noise.start(now);
         }
         
         function createSplashSound(x, y) {
@@ -710,6 +800,50 @@
             const velocity = Math.sqrt(mouseVelX * mouseVelX + mouseVelY * mouseVelY);
             const now = audioContext.currentTime;
             
+            const currentAcceleration = velocity - prevVelocityMag;
+            acceleration = acceleration * 0.7 + currentAcceleration * 0.3;
+            prevVelocityMag = velocity;
+            
+            if (velocity > 0.01) {
+                recentVelocities.push({ 
+                    vx: mouseVelX, 
+                    vy: mouseVelY,
+                    mag: velocity,
+                    time: Date.now() 
+                });
+                if (recentVelocities.length > MAX_VELOCITIES) {
+                    recentVelocities.shift();
+                }
+            }
+            
+            if (recentVelocities.length > 3) {
+                let avgVx = 0, avgVy = 0, avgMag = 0;
+                recentVelocities.forEach(v => {
+                    avgVx += v.vx;
+                    avgVy += v.vy;
+                    avgMag += v.mag;
+                });
+                avgVx /= recentVelocities.length;
+                avgVy /= recentVelocities.length;
+                avgMag /= recentVelocities.length;
+                
+                let dirVariance = 0;
+                let magVariance = 0;
+                recentVelocities.forEach(v => {
+                    const dx = v.vx - avgVx;
+                    const dy = v.vy - avgVy;
+                    dirVariance += dx * dx + dy * dy;
+                    magVariance += Math.pow(v.mag - avgMag, 2);
+                });
+                dirVariance /= recentVelocities.length;
+                magVariance /= recentVelocities.length;
+                
+                const rawTurbulence = Math.min((dirVariance * 50 + magVariance * 100), 1);
+                turbulence = turbulence * 0.9 + rawTurbulence * 0.1;
+            } else {
+                turbulence *= 0.95;
+            }
+            
             if (velocity > 0.02) {
                 recentPositions.push({ x: mouseX, y: mouseY, time: Date.now() });
                 if (recentPositions.length > MAX_POSITIONS) {
@@ -719,6 +853,7 @@
             
             const currentTime = Date.now();
             recentPositions = recentPositions.filter(pos => currentTime - pos.time < 2000);
+            recentVelocities = recentVelocities.filter(v => currentTime - v.time < 1000);
             
             if (recentPositions.length > 5) {
                 let avgX = 0, avgY = 0;
@@ -767,7 +902,9 @@
                 createMovementSound(
                     { x: mouseVelX, y: mouseVelY },
                     { x: mouseVelX / Math.max(0.01, velocity), y: mouseVelY / Math.max(0.01, velocity) },
-                    areaConcentration
+                    areaConcentration,
+                    turbulence,
+                    acceleration
                 );
                 lastSoundTime = Date.now();
                 
@@ -776,6 +913,10 @@
                         if (audioEnabled) createHarmonicRipple(areaConcentration);
                     }, 50 + Math.random() * 100);
                 }
+            }
+            
+            if (prevVelocityMag > 0.3 && velocity < 0.05 && acceleration < -0.2) {
+                createStopAccent(prevVelocityMag);
             }
         }
         
