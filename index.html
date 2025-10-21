@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Metallic Fluid Synth</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: 'Arial', sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+        }
+        button {
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            color: #000;
+            padding: 8px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: translateY(-1px);
+        }
+        button.active {
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+        }
+        button.active:hover {
+            background: rgba(0, 0, 0, 1);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+        <button id="toggleAudio">Audio Off</button>
+    </div>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const gl = canvas.getContext('webgl', {
+            alpha: false,
+            depth: false,
+            stencil: false,
+            antialias: false,
+            premultipliedAlpha: false,
+            preserveDrawingBuffer: false,
+            powerPreference: 'high-performance'
+        });
+
+        if (!gl) {
+            alert('WebGL not supported');
+        }
+
+        const floatExt = gl.getExtension('OES_texture_float');
+        const floatLinearExt = gl.getExtension('OES_texture_float_linear');
+
+        let simWidth = 128;
+        let simHeight = 128;
+
+        function resize() {
+            const dpr = Math.min(window.devicePixelRatio, 2);
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        const vertexShaderSource = `
+            attribute vec2 position;
+            varying vec2 vUv;
+            void main() {
+                vUv = position * 0.5 + 0.5;
+                gl_Position = vec4(position, 0.0, 1.0);
+            }
+        `;
+
+        const advectionShaderSource = `
+            precision mediump float;
+            uniform sampler2D uVelocity;
+            uniform sampler2D uSource;
+            uniform vec2 texelSize;
+            uniform float dt;
+            uniform float dissipation;
+            varying vec2 vUv;
+            
+            void main() {
+                vec2 coord = vUv - dt * texture2D(uVelocity, vUv).xy * texelSize;
+                gl_FragColor = dissipation * texture2D(uSource, coord);
+            }
+        `;
+
+        const divergenceShaderSource = `
+            precision mediump float;
+            uniform sampler2D uVelocity;
+            uniform vec2 texelSize;
+            varying vec2 vUv;
+            
+            void main() {
+                float L = texture2D(uVelocity, vUv - vec2(texelSize.x, 0.0)).x;
+                float R = texture2D(uVelocity, vUv + vec2(texelSize.x, 0.0)).x;
+                float T = texture2D(uVelocity, vUv + vec2(0.0, texelSize.y)).y;
+                float B = texture2D(uVelocity, vUv - vec2(0.0, texelSize.y)).y;
+                
+                float div = 0.5 * (R - L + T - B);
+                gl_FragColor = vec4(div, 0.0, 0.0, 1.0);
+            }
+        `;
+
+        const pressureShaderSource = `
+            precision mediump float;
+            uniform sampler2D uPressure;
+            uniform sampler2D uDivergence;
+            uniform vec2 texelSize;
+            varying vec2 vUv;
+            
+            void main() {
+                float L = texture2D(uPressure, vUv - vec2(texelSize.x, 0.0)).x;
+                float R = texture2D(uPressure, vUv + vec2(texelSize.x, 0.0)).x;
+                float T = texture2D(uPressure, vUv + vec2(0.0, texelSize.y)).x;
+                float B = texture2D(uPressure, vUv - vec2(0.0, texelSize.y)).x;
+                float C = texture2D(uDivergence, vUv).x;
+                
+                gl_FragColor = vec4((L + R + B + T - C) * 0.25, 0.0, 0.0, 1.0);
+            }
+        `;
+
+        const gradientSubtractShaderSource = `
+            precision mediump float;
+            uniform sampler2D uPressure;
+            uniform sampler2D uVelocity;
+            uniform vec2 texelSize;
+            varying vec2 vUv;
+            
+            void main() {
+                float L = texture2D(uPressure, vUv - vec2(texelSize.x, 0.0)).x;
+                float R = texture2D(uPressure, vUv + vec2(texelSize.x, 0.0)).x;
+                float T = texture2D(uPressure, vUv + vec2(0.0, texelSize.y)).x;
+                float B = texture2D(uPressure, vUv - vec2(0.0, texelSize.y)).x;
+                
+                vec2 velocity = texture2D(uVelocity, vUv).xy;
+                velocity.xy -= vec2(R - L, T - B) * 0.5;
+                
+                gl_FragColor = vec4(velocity, 0.0, 1.0);
+            }
+        `;
+
+        const splatShaderSource = `
+            precision mediump float;
+            uniform sampler2D uTarget;
+            uniform float aspectRatio;
+            uniform vec2 point;
+            uniform vec3 color;
+            uniform float radius;
+            varying vec2 vUv;
+            
+            void main() {
+                vec2 p = vUv - point;
+                p.x *= aspectRatio;
+                
+                vec3 splat = exp(-dot(p, p) / radius) * color;
+                vec3 base = texture2D(uTarget, vUv).xyz;
+                
+                gl_FragColor = vec4(base + splat, 1.0);
+            }
+        `;
+
+        const displayShaderSource = `
+            precision mediump float;
+            uniform sampler2D uVelocity;
+            uniform float time;
+            uniform vec2 resolution;
+            varying vec2 vUv;
+            
+            const float PI = 3.141592654;
+            const float scale = 0.25;
+            const vec4 a = vec4(4.5, 6.0, 8.0, 11.0);
+            const vec2 b = vec2(1.0, 1.0);
+            
+            const vec3 color1 = vec3(0.95);
+            const vec3 color2 = vec3(0.66, 0.67, 0.70);
+            const vec3 color3 = vec3(0.35, 0.37, 0.42);
+            const vec3 color4 = vec3(0.56, 0.57, 0.62);
+            
+            float cheapNoise(vec3 p) {
+                float s1 = sin(p.z + p.x * a.x + cos(p.x * a.x - p.z));
+                float c1 = cos(p.z + p.y * a.y + cos(p.y * a.x + p.z));
+                float s2 = sin(1.0 + p.x * a.z + p.z + cos(p.y * a.w - p.z));
+                float c2 = cos(1.0 + p.y * a.w + p.z + cos(p.x * a.x + p.z));
+                return s1 * c1 * 0.564 + s2 * c2 * 0.436;
+            }
+            
+            void main() {
+                vec2 aR = vec2(resolution.x / resolution.y, 1.0);
+                vec2 st = vUv * aR * scale;
+                
+                vec2 velocity = texture2D(uVelocity, vUv).xy;
+                vec2 fluidDistortion = velocity * 3.0;
+                
+                float t = time * 0.008;
+                float S = sin(t);
+                float C = cos(t);
+                
+                vec3 stMod = vec3(st + fluidDistortion * 0.5, 0.0);
+                
+                vec2 v1 = vec2(
+                    cheapNoise(stMod + vec3(0.0, 0.0, 2.0)),
+                    cheapNoise(stMod + vec3(0.0, 0.0, 1.0))
+                );
+                
+                vec2 offset1 = vec2(C * 1.7, S * 9.2) + fluidDistortion * 0.3;
+                vec2 offset2 = vec2(S * 8.3, C * 2.8) + fluidDistortion * 0.3;
+                
+                vec2 v2 = vec2(
+                    cheapNoise(vec3(st + b.x * v1 + offset1, 0.12 * time)),
+                    cheapNoise(vec3(st + b.y * v1 + offset2, 0.10 * time))
+                );
+                
+                float n = 0.5 + 0.5 * cheapNoise(vec3(st + v2 + fluidDistortion * 0.2, 0.0));
+                
+                float nn = n * n;
+                vec3 color = mix(color1, color2, clamp(nn * 8.0, 0.0, 1.0));
+                color = mix(color, color3, clamp(length(v1), 0.0, 1.0));
+                color = mix(color, color4, clamp(length(v2.x), 0.0, 1.0));
+                
+                float velocityMag = length(velocity);
+                color += vec3(0.2) * velocityMag;
+                
+                color /= nn + n * 7.0;
+                
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        function compileShader(type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error('Shader compilation error:', gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(vertSource, fragSource) {
+            const vertShader = compileShader(gl.VERTEX_SHADER, vertSource);
+            const fragShader = compileShader(gl.FRAGMENT_SHADER, fragSource);
+            
+            const program = gl.createProgram();
+            gl.attachShader(program, vertShader);
+            gl.attachShader(program, fragShader);
+            gl.linkProgram(program);
+            
+            if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                console.error('Program linking error:', gl.getProgramInfoLog(program));
+                return null;
+            }
+            
+            return program;
+        }
+
+        const advectionProgram = createProgram(vertexShaderSource, advectionShaderSource);
+        const divergenceProgram = createProgram(vertexShaderSource, divergenceShaderSource);
+        const pressureProgram = createProgram(vertexShaderSource, pressureShaderSource);
+        const gradientSubtractProgram = createProgram(vertexShaderSource, gradientSubtractShaderSource);
+        const splatProgram = createProgram(vertexShaderSource, splatShaderSource);
+        const displayProgram = createProgram(vertexShaderSource, displayShaderSource);
+
+        const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+        function createFramebuffer(width, height) {
+            const texture = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, texture);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.FLOAT, null);
+            
+            const fbo = gl.createFramebuffer();
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+            
+            gl.bindTexture(gl.TEXTURE_2D, null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            
+            return { fbo, texture, width, height };
+        }
+
+        function createDoubleFBO(width, height) {
+            return {
+                read: createFramebuffer(width, height),
+                write: createFramebuffer(width, height),
+                swap: function() {
+                    const temp = this.read;
+                    this.read = this.write;
+                    this.write = temp;
+                }
+            };
+        }
+
+        const velocity = createDoubleFBO(simWidth, simHeight);
+        const divergence = createFramebuffer(simWidth, simHeight);
+        const pressure = createDoubleFBO(simWidth, simHeight);
+
+        // Mouse and interaction state
+        let mouseX = 0.5;
+        let mouseY = 0.5;
+        let lastMouseX = 0.5;
+        let lastMouseY = 0.5;
+        let mouseVelX = 0;
+        let mouseVelY = 0;
+        let movementMomentum = 0;
+        let areaConcentration = 0;
+        let recentPositions = [];
+        let pendingClicks = [];
+        const MAX_POSITIONS = 20;
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.clientX / rect.width;
+            mouseY = 1.0 - e.clientY / rect.height;
+        });
+
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.clientX / rect.width;
+            const clickY = 1.0 - e.clientY / rect.height;
+            pendingClicks.push({ x: clickX, y: clickY });
+            
+            if (audioEnabled) {
+                createSplashSound(clickX, clickY);
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            mouseX = e.touches[0].clientX / rect.width;
+            mouseY = 1.0 - e.touches[0].clientY / rect.height;
+        }, { passive: false });
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const clickX = e.touches[0].clientX / rect.width;
+            const clickY = 1.0 - e.touches[0].clientY / rect.height;
+            pendingClicks.push({ x: clickX, y: clickY });
+            
+            if (audioEnabled) {
+                createSplashSound(clickX, clickY);
+            }
+        }, { passive: false });
+
+        function bindFramebuffer(target) {
+            gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
+            gl.viewport(0, 0, target.width, target.height);
+        }
+
+        // ===== AUDIO ENGINE =====
+        let audioContext = null;
+        let audioEnabled = false;
+        
+        let activeDrones = [];
+        let masterGain;
+        let convolver, convolverGain;
+        let lastSoundTime = 0;
+        let rootDrone, rootGain;
+        let echoTone, echoGain, echoFilter;
+        
+        const SCALE = [
+            73.42, 87.31, 98.00, 110.00, 130.81,
+            146.83, 174.61, 196.00, 220.00, 261.63,
+            293.66, 349.23, 392.00, 440.00, 523.25,
+            587.33, 698.46, 783.99, 880.00, 1046.50
+        ];
+        
+        function initAudio() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            
+            masterGain = audioContext.createGain();
+            masterGain.gain.value = 0.3;
+            masterGain.connect(audioContext.destination);
+            
+            convolver = audioContext.createConvolver();
+            convolverGain = audioContext.createGain();
+            convolverGain.gain.value = 0.7;
+            convolver.connect(convolverGain);
+            convolverGain.connect(masterGain);
+            
+            const sampleRate = audioContext.sampleRate;
+            const length = sampleRate * 4;
+            const impulse = audioContext.createBuffer(2, length, sampleRate);
+            const impulseL = impulse.getChannelData(0);
+            const impulseR = impulse.getChannelData(1);
+            
+            for (let i = 0; i < length; i++) {
+                impulseL[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 3.5);
+                impulseR[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 3.5);
+            }
+            convolver.buffer = impulse;
+            
+            rootGain = audioContext.createGain();
+            rootGain.gain.value = 0.0;
+            
+            rootDrone = audioContext.createOscillator();
+            rootDrone.type = 'sine';
+            rootDrone.frequency.value = SCALE[0];
+            
+            const rootFilter = audioContext.createBiquadFilter();
+            rootFilter.type = 'lowpass';
+            rootFilter.frequency.value = 300;
+            rootFilter.Q.value = 1;
+            
+            rootDrone.connect(rootFilter);
+            rootFilter.connect(rootGain);
+            rootGain.connect(convolver);
+            rootDrone.start();
+            
+            echoGain = audioContext.createGain();
+            echoGain.gain.value = 0.0;
+            
+            echoFilter = audioContext.createBiquadFilter();
+            echoFilter.type = 'lowpass';
+            echoFilter.frequency.value = 400;
+            echoFilter.Q.value = 1.5;
+            
+            echoTone = audioContext.createOscillator();
+            echoTone.type = 'sine';
+            echoTone.frequency.value = SCALE[5];
+            
+            echoTone.connect(echoFilter);
+            echoFilter.connect(echoGain);
+            echoGain.connect(convolver);
+            echoTone.start();
+            
+            audioEnabled = true;
+        }
+        
+        function quantizePitch(mouseYPos) {
+            const scaleIndex = Math.floor((1 - mouseYPos) * (SCALE.length - 1));
+            return SCALE[Math.max(0, Math.min(SCALE.length - 1, scaleIndex))];
+        }
+
+        function createMovementSound(velocity, direction, complexity) {
+            const now = audioContext.currentTime;
+            const baseFreq = quantizePitch(mouseY);
+            const velocityMag = Math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y);
+            
+            if (velocityMag < 0.02) return;
+            
+            const duration = 0.4 + Math.min(velocityMag * 2, 2.0);
+            const velocityCurve = Math.pow(velocityMag, 1.5);
+            const amplitude = (0.03 + velocityCurve * 0.15) * (1 + complexity * 0.4);
+            
+            const fundamental = audioContext.createOscillator();
+            fundamental.type = 'sine';
+            fundamental.frequency.value = baseFreq;
+            
+            const vibrato = audioContext.createOscillator();
+            vibrato.frequency.value = (4 + Math.random() * 2) * (1 + complexity * 0.5);
+            const vibratoGain = audioContext.createGain();
+            vibratoGain.gain.value = baseFreq * 0.005 * (1 + complexity);
+            vibrato.connect(vibratoGain);
+            vibratoGain.connect(fundamental.frequency);
+            vibrato.start(now);
+            vibrato.stop(now + duration);
+            
+            const fundEnv = audioContext.createGain();
+            fundEnv.gain.value = 0;
+            fundEnv.gain.linearRampToValueAtTime(amplitude, now + 0.08);
+            fundEnv.gain.linearRampToValueAtTime(amplitude * 0.8, now + duration * 0.7);
+            fundEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const numHarmonics = Math.floor(2 + complexity * 2);
+            const harmonics = [];
+            const harmonicRatios = [1.5, 2, 3, 4];
+            
+            for (let i = 0; i < numHarmonics; i++) {
+                const harmOsc = audioContext.createOscillator();
+                harmOsc.type = 'sine';
+                harmOsc.frequency.value = baseFreq * harmonicRatios[i];
+                
+                const harmEnv = audioContext.createGain();
+                harmEnv.gain.value = 0;
+                const harmAmp = amplitude * (0.2 - i * 0.04) * (1 + complexity * 0.3);
+                harmEnv.gain.linearRampToValueAtTime(harmAmp, now + 0.08);
+                harmEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                
+                harmOsc.connect(harmEnv);
+                harmonics.push({ osc: harmOsc, env: harmEnv });
+            }
+            
+            const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.1, audioContext.sampleRate);
+            const noiseData = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noiseData.length; i++) {
+                noiseData[i] = Math.random() * 2 - 1;
+            }
+            
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            noise.loop = true;
+            
+            const noiseFilter = audioContext.createBiquadFilter();
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.value = baseFreq * 1.5;
+            noiseFilter.Q.value = 2 + velocityCurve * 4 + complexity * 2;
+            
+            const noiseEnv = audioContext.createGain();
+            noiseEnv.gain.value = 0;
+            const noiseAmp = amplitude * 0.3 * velocityCurve * (1 + complexity * 0.5);
+            noiseEnv.gain.linearRampToValueAtTime(noiseAmp, now + 0.05);
+            noiseEnv.gain.linearRampToValueAtTime(noiseAmp * 0.5, now + duration * 0.5);
+            noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const mainFilter = audioContext.createBiquadFilter();
+            mainFilter.type = 'lowpass';
+            mainFilter.frequency.value = baseFreq * (3 + complexity * 2 + velocityCurve * 2) + velocityCurve * 1200;
+            mainFilter.Q.value = 0.7 + complexity * 0.5;
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8));
+            
+            fundamental.connect(fundEnv);
+            noise.connect(noiseFilter);
+            noiseFilter.connect(noiseEnv);
+            
+            fundEnv.connect(mainFilter);
+            harmonics.forEach(h => h.env.connect(mainFilter));
+            noiseEnv.connect(mainFilter);
+            
+            mainFilter.connect(panner);
+            panner.connect(masterGain);
+            panner.connect(convolver);
+            
+            fundamental.start(now);
+            fundamental.stop(now + duration);
+            harmonics.forEach(h => {
+                h.osc.start(now);
+                h.osc.stop(now + duration);
+            });
+            noise.start(now);
+            noise.stop(now + duration);
+            
+            if (velocityMag > 0.3 && Math.random() < 0.2 + complexity * 0.3) {
+                createAirPuff(velocityMag * (1 + complexity * 0.5));
+            }
+        }
+        
+        function createSplashSound(x, y) {
+            const now = audioContext.currentTime;
+            const baseFreq = quantizePitch(y);
+            const duration = 0.8 + Math.random() * 0.3;
+            
+            const fundamental = audioContext.createOscillator();
+            fundamental.type = 'sine';
+            fundamental.frequency.value = baseFreq * 0.5;
+            fundamental.frequency.exponentialRampToValueAtTime(baseFreq * 0.4, now + duration);
+            
+            const fundEnv = audioContext.createGain();
+            fundEnv.gain.value = 0;
+            fundEnv.gain.linearRampToValueAtTime(0.15, now + 0.02);
+            fundEnv.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const sparkle = audioContext.createOscillator();
+            sparkle.type = 'sine';
+            sparkle.frequency.value = baseFreq * 4 + Math.random() * 500;
+            sparkle.frequency.exponentialRampToValueAtTime(baseFreq * 2, now + duration * 0.3);
+            
+            const sparkleEnv = audioContext.createGain();
+            sparkleEnv.gain.value = 0;
+            sparkleEnv.gain.linearRampToValueAtTime(0.08, now + 0.01);
+            sparkleEnv.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.4);
+            
+            const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.2, audioContext.sampleRate);
+            const noiseData = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noiseData.length; i++) {
+                noiseData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / noiseData.length, 1.5);
+            }
+            
+            const splash = audioContext.createBufferSource();
+            splash.buffer = noiseBuffer;
+            
+            const splashFilter = audioContext.createBiquadFilter();
+            splashFilter.type = 'bandpass';
+            splashFilter.frequency.value = baseFreq * 2;
+            splashFilter.Q.value = 3;
+            
+            const splashEnv = audioContext.createGain();
+            splashEnv.gain.value = 0;
+            splashEnv.gain.linearRampToValueAtTime(0.12, now + 0.005);
+            splashEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2));
+            
+            fundamental.connect(fundEnv);
+            sparkle.connect(sparkleEnv);
+            splash.connect(splashFilter);
+            splashFilter.connect(splashEnv);
+            
+            fundEnv.connect(panner);
+            sparkleEnv.connect(panner);
+            splashEnv.connect(panner);
+            
+            panner.connect(masterGain);
+            panner.connect(convolver);
+            
+            fundamental.start(now);
+            fundamental.stop(now + duration);
+            sparkle.start(now);
+            sparkle.stop(now + duration * 0.4);
+            splash.start(now);
+        }
+        
+        function createHarmonicRipple(complexity) {
+            const now = audioContext.currentTime;
+            const baseFreq = quantizePitch(mouseY);
+            const duration = 0.3 + complexity * 0.4;
+            
+            const intervals = [1.25, 1.5, 2];
+            const interval = intervals[Math.floor(Math.random() * intervals.length)];
+            
+            const osc = audioContext.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = baseFreq * interval;
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            const amp = 0.02 * complexity;
+            env.gain.linearRampToValueAtTime(amp, now + 0.05);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = baseFreq * interval * 2;
+            filter.Q.value = 2;
+            
+            const panner = audioContext.createStereoPanner();
+            const panOffset = (Math.random() - 0.5) * 0.6;
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8 + panOffset));
+            
+            osc.connect(filter);
+            filter.connect(env);
+            env.connect(panner);
+            panner.connect(convolver);
+            
+            osc.start(now);
+            osc.stop(now + duration);
+        }
+        
+        function createAirPuff(intensity) {
+            const now = audioContext.currentTime;
+            const duration = 0.12;
+            
+            const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.1, audioContext.sampleRate);
+            const noiseData = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noiseData.length; i++) {
+                noiseData[i] = Math.random() * 2 - 1;
+            }
+            
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.value = 2000 + Math.random() * 1000;
+            filter.Q.value = 1;
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(0.03 * intensity, now + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 2));
+            
+            noise.connect(filter);
+            filter.connect(env);
+            env.connect(panner);
+            panner.connect(convolver);
+            
+            noise.start(now);
+            noise.stop(now + duration);
+        }
+        
+        function updateAudio() {
+            if (!audioEnabled) return;
+            
+            const velocity = Math.sqrt(mouseVelX * mouseVelX + mouseVelY * mouseVelY);
+            const now = audioContext.currentTime;
+            
+            if (velocity > 0.02) {
+                recentPositions.push({ x: mouseX, y: mouseY, time: Date.now() });
+                if (recentPositions.length > MAX_POSITIONS) {
+                    recentPositions.shift();
+                }
+            }
+            
+            const currentTime = Date.now();
+            recentPositions = recentPositions.filter(pos => currentTime - pos.time < 2000);
+            
+            if (recentPositions.length > 5) {
+                let avgX = 0, avgY = 0;
+                recentPositions.forEach(pos => {
+                    avgX += pos.x;
+                    avgY += pos.y;
+                });
+                avgX /= recentPositions.length;
+                avgY /= recentPositions.length;
+                
+                let spread = 0;
+                recentPositions.forEach(pos => {
+                    const dx = pos.x - avgX;
+                    const dy = pos.y - avgY;
+                    spread += Math.sqrt(dx * dx + dy * dy);
+                });
+                spread /= recentPositions.length;
+                
+                const targetConcentration = Math.max(0, 1 - spread * 5);
+                areaConcentration = areaConcentration * 0.95 + targetConcentration * 0.05;
+            } else {
+                areaConcentration *= 0.98;
+            }
+            
+            movementMomentum += velocity * 0.8;
+            movementMomentum = Math.min(movementMomentum, 3.0);
+            movementMomentum *= 0.97;
+            
+            if (echoGain && echoTone && echoFilter) {
+                const echoVolume = movementMomentum * 0.015;
+                echoGain.gain.linearRampToValueAtTime(echoVolume, now + 0.5);
+                
+                const targetPitch = quantizePitch(mouseY);
+                echoTone.frequency.linearRampToValueAtTime(targetPitch, now + 0.8);
+                
+                const filterFreq = 300 + movementMomentum * 400;
+                echoFilter.frequency.linearRampToValueAtTime(filterFreq, now + 0.6);
+            }
+            
+            if (rootGain) {
+                const rootVolume = Math.min((movementMomentum * 0.008 + areaConcentration * 0.012), 0.025);
+                rootGain.gain.linearRampToValueAtTime(rootVolume, now + 0.4);
+            }
+            
+            if (velocity > 0.02 && Date.now() - lastSoundTime > 50) {
+                createMovementSound(
+                    { x: mouseVelX, y: mouseVelY },
+                    { x: mouseVelX / Math.max(0.01, velocity), y: mouseVelY / Math.max(0.01, velocity) },
+                    areaConcentration
+                );
+                lastSoundTime = Date.now();
+                
+                if (areaConcentration > 0.5 && Math.random() < areaConcentration) {
+                    setTimeout(() => {
+                        if (audioEnabled) createHarmonicRipple(areaConcentration);
+                    }, 50 + Math.random() * 100);
+                }
+            }
+        }
+        
+        window.addEventListener('DOMContentLoaded', function() {
+            const toggleBtn = document.getElementById('toggleAudio');
+            if (toggleBtn) {
+                toggleBtn.addEventListener('click', function() {
+                    if (!audioEnabled) {
+                        initAudio();
+                        this.textContent = 'Audio On';
+                        this.classList.add('active');
+                    } else {
+                        audioEnabled = false;
+                        if (audioContext) audioContext.close();
+                        audioContext = null;
+                        this.textContent = 'Audio Off';
+                        this.classList.remove('active');
+                    }
+                });
+            }
+        });
+
+        function render(time) {
+            time *= 0.001;
+            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+            
+            const dt = Math.min(1.0 / 60.0, 0.016);
+            const deltaX = (mouseX - lastMouseX) * 10.0;
+            const deltaY = (mouseY - lastMouseY) * 10.0;
+            
+            mouseVelX = deltaX;
+            mouseVelY = deltaY;
+            
+            if (pendingClicks.length > 0) {
+                pendingClicks.forEach(click => {
+                    gl.useProgram(splatProgram);
+                    const posLoc = gl.getAttribLocation(splatProgram, 'position');
+                    gl.enableVertexAttribArray(posLoc);
+                    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+                    
+                    bindFramebuffer(velocity.write);
+                    gl.uniform1i(gl.getUniformLocation(splatProgram, 'uTarget'), 0);
+                    gl.uniform1f(gl.getUniformLocation(splatProgram, 'aspectRatio'), canvas.width / canvas.height);
+                    gl.uniform2f(gl.getUniformLocation(splatProgram, 'point'), click.x, click.y);
+                    
+                    const angle = Math.random() * Math.PI * 2;
+                    const force = 15.0;
+                    gl.uniform3f(gl.getUniformLocation(splatProgram, 'color'), 
+                        Math.cos(angle) * force, 
+                        Math.sin(angle) * force, 
+                        0.0
+                    );
+                    gl.uniform1f(gl.getUniformLocation(splatProgram, 'radius'), 0.008);
+                    
+                    gl.activeTexture(gl.TEXTURE0);
+                    gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+                    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                    
+                    velocity.swap();
+                });
+                pendingClicks = [];
+            }
+            
+            if (Math.abs(deltaX) > 0.01 || Math.abs(deltaY) > 0.01) {
+                gl.useProgram(splatProgram);
+                const posLoc = gl.getAttribLocation(splatProgram, 'position');
+                gl.enableVertexAttribArray(posLoc);
+                gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+                
+                bindFramebuffer(velocity.write);
+                gl.uniform1i(gl.getUniformLocation(splatProgram, 'uTarget'), 0);
+                gl.uniform1f(gl.getUniformLocation(splatProgram, 'aspectRatio'), canvas.width / canvas.height);
+                gl.uniform2f(gl.getUniformLocation(splatProgram, 'point'), mouseX, mouseY);
+                gl.uniform3f(gl.getUniformLocation(splatProgram, 'color'), deltaX, deltaY, 0.0);
+                gl.uniform1f(gl.getUniformLocation(splatProgram, 'radius'), 0.002);
+                
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                
+                velocity.swap();
+                
+                updateAudio();
+            }
+            
+            lastMouseX = mouseX;
+            lastMouseY = mouseY;
+            
+            gl.useProgram(advectionProgram);
+            const advPosLoc = gl.getAttribLocation(advectionProgram, 'position');
+            gl.enableVertexAttribArray(advPosLoc);
+            gl.vertexAttribPointer(advPosLoc, 2, gl.FLOAT, false, 0, 0);
+            
+            bindFramebuffer(velocity.write);
+            gl.uniform1i(gl.getUniformLocation(advectionProgram, 'uVelocity'), 0);
+            gl.uniform1i(gl.getUniformLocation(advectionProgram, 'uSource'), 1);
+            gl.uniform2f(gl.getUniformLocation(advectionProgram, 'texelSize'), 1.0 / simWidth, 1.0 / simHeight);
+            gl.uniform1f(gl.getUniformLocation(advectionProgram, 'dt'), dt);
+            gl.uniform1f(gl.getUniformLocation(advectionProgram, 'dissipation'), 0.995);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            velocity.swap();
+            
+            gl.useProgram(divergenceProgram);
+            const divPosLoc = gl.getAttribLocation(divergenceProgram, 'position');
+            gl.enableVertexAttribArray(divPosLoc);
+            gl.vertexAttribPointer(divPosLoc, 2, gl.FLOAT, false, 0, 0);
+            
+            bindFramebuffer(divergence);
+            gl.uniform1i(gl.getUniformLocation(divergenceProgram, 'uVelocity'), 0);
+            gl.uniform2f(gl.getUniformLocation(divergenceProgram, 'texelSize'), 1.0 / simWidth, 1.0 / simHeight);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            bindFramebuffer(pressure.read);
+            gl.clearColor(0, 0, 0, 1);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            
+            gl.useProgram(pressureProgram);
+            const pressPosLoc = gl.getAttribLocation(pressureProgram, 'position');
+            gl.enableVertexAttribArray(pressPosLoc);
+            gl.vertexAttribPointer(pressPosLoc, 2, gl.FLOAT, false, 0, 0);
+            
+            for (let i = 0; i < 20; i++) {
+                bindFramebuffer(pressure.write);
+                gl.uniform1i(gl.getUniformLocation(pressureProgram, 'uPressure'), 0);
+                gl.uniform1i(gl.getUniformLocation(pressureProgram, 'uDivergence'), 1);
+                gl.uniform2f(gl.getUniformLocation(pressureProgram, 'texelSize'), 1.0 / simWidth, 1.0 / simHeight);
+                
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, pressure.read.texture);
+                gl.activeTexture(gl.TEXTURE1);
+                gl.bindTexture(gl.TEXTURE_2D, divergence.texture);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                
+                pressure.swap();
+            }
+            
+            gl.useProgram(gradientSubtractProgram);
+            const gradPosLoc = gl.getAttribLocation(gradientSubtractProgram, 'position');
+            gl.enableVertexAttribArray(gradPosLoc);
+            gl.vertexAttribPointer(gradPosLoc, 2, gl.FLOAT, false, 0, 0);
+            
+            bindFramebuffer(velocity.write);
+            gl.uniform1i(gl.getUniformLocation(gradientSubtractProgram, 'uPressure'), 0);
+            gl.uniform1i(gl.getUniformLocation(gradientSubtractProgram, 'uVelocity'), 1);
+            gl.uniform2f(gl.getUniformLocation(gradientSubtractProgram, 'texelSize'), 1.0 / simWidth, 1.0 / simHeight);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, pressure.read.texture);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            velocity.swap();
+            
+            gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.useProgram(displayProgram);
+            
+            const dispPosLoc = gl.getAttribLocation(displayProgram, 'position');
+            gl.enableVertexAttribArray(dispPosLoc);
+            gl.vertexAttribPointer(dispPosLoc, 2, gl.FLOAT, false, 0, 0);
+            
+            gl.uniform1i(gl.getUniformLocation(displayProgram, 'uVelocity'), 0);
+            gl.uniform1f(gl.getUniformLocation(displayProgram, 'time'), time);
+            gl.uniform2f(gl.getUniformLocation(displayProgram, 'resolution'), canvas.width, canvas.height);
+            
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, velocity.read.texture);
+            gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            requestAnimationFrame(render);
+        }
+
+        requestAnimationFrame(render);
+    </script>
+</body>
+</html>
