@@ -2106,6 +2106,22 @@
         // Polyrhythm state
         let polyrhythmTimers = [];
         const POLYRHYTHM_DIVISIONS = [3, 5, 7]; // Triplets, quintuplets, septuplets
+        
+        // Color morphing for rhythmic effects
+        // Maps each color to its morph target color
+        const colorMorphMap = {
+            0: 3, // Grey → Yellow
+            1: 5, // Brown → Pink
+            2: 4, // Blue → Green
+            3: 2, // Yellow → Blue
+            4: 0, // Green → Grey
+            5: 1, // Pink → Brown
+            6: 3  // Red → Yellow
+        };
+        
+        // Color trail state for rhythmic effects
+        let previousPaintPositions = []; // Store recent positions for trail effect
+        const MAX_TRAIL_LENGTH = 12; // How many trail positions to keep (longer rainbow!)
 
         // ===== DRAWN WAVEFORMS (ORAMICS) =====
         /*
@@ -4738,17 +4754,107 @@
                 if (selectedColorIndex >= 0) {
                     const voice = colorVoices[selectedColorIndex];
                     
+                    // Check if any rhythmic effect is active for color trail
+                    const colorTrailActive = oramicsEffects.arpeggiator.active || 
+                                            oramicsEffects.stutter.active || 
+                                            oramicsEffects.polyrhythm.active;
+                    
                     gl.useProgram(colorSplatProgram);
                     const colorPosLoc = gl.getAttribLocation(colorSplatProgram, 'position');
                     gl.enableVertexAttribArray(colorPosLoc);
                     gl.vertexAttribPointer(colorPosLoc, 2, gl.FLOAT, false, 0, 0);
                     
+                    const injectionStrength = 0.8;
+                    
+                    if (colorTrailActive) {
+                        // TRAIL EFFECT: Different effects based on which rhythmic button is active
+                        const useRainbowTrail = oramicsEffects.polyrhythm.active;
+                        
+                        if (useRainbowTrail) {
+                            // RAINBOW TRAIL for Polyrhythm (◈)
+                            // Paint trail at recent previous positions with rainbow colors
+                            previousPaintPositions.forEach((pos, index) => {
+                                bindFramebuffer(colorBuffer.write);
+                                gl.uniform1i(gl.getUniformLocation(colorSplatProgram, 'uTarget'), 0);
+                                gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'aspectRatio'), canvas.width / canvas.height);
+                                gl.uniform2f(gl.getUniformLocation(colorSplatProgram, 'point'), pos.x, pos.y);
+                                
+                                // Trail fades as it gets older - SUPER STRONG NOW
+                                const fadeAmount = 0.7 + (index / previousPaintPositions.length) * 1.0; // 0.7 to 1.7 (very bright!)
+                                
+                                // Calculate rainbow color based on position in trail
+                                // Cycle through hue values (0-360 degrees)
+                                const hue = (index / previousPaintPositions.length) * 360; // 0° to 360°
+                                
+                                // Convert HSL to RGB for rainbow effect
+                                const h = hue / 60;
+                                const c = 1; // Full saturation
+                                const x = c * (1 - Math.abs((h % 2) - 1));
+                                
+                                let r, g, b;
+                                if (h >= 0 && h < 1) { r = c; g = x; b = 0; }
+                                else if (h >= 1 && h < 2) { r = x; g = c; b = 0; }
+                                else if (h >= 2 && h < 3) { r = 0; g = c; b = x; }
+                                else if (h >= 3 && h < 4) { r = 0; g = x; b = c; }
+                                else if (h >= 4 && h < 5) { r = x; g = 0; b = c; }
+                                else { r = c; g = 0; b = x; }
+                                
+                                gl.uniform3f(gl.getUniformLocation(colorSplatProgram, 'color'), 
+                                    r * injectionStrength * fadeAmount * 2.5, // Boosted by 2.5x - MUCH STRONGER!
+                                    g * injectionStrength * fadeAmount * 2.5,
+                                    b * injectionStrength * fadeAmount * 2.5
+                                );
+                                gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'radius'), 0.006); // 3x larger radius - BOLD!
+                                
+                                gl.activeTexture(gl.TEXTURE0);
+                                gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
+                                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                                
+                                colorBuffer.swap();
+                            });
+                        } else {
+                            // TWO-COLOR GRADIENT TRAIL for Arpeggiator (⟨⟩) and Stutter (⧈)
+                            const secondaryColorIndex = colorMorphMap[selectedColorIndex];
+                            const secondaryVoice = colorVoices[secondaryColorIndex];
+                            
+                            // Paint trail at recent previous positions
+                            previousPaintPositions.forEach((pos, index) => {
+                                bindFramebuffer(colorBuffer.write);
+                                gl.uniform1i(gl.getUniformLocation(colorSplatProgram, 'uTarget'), 0);
+                                gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'aspectRatio'), canvas.width / canvas.height);
+                                gl.uniform2f(gl.getUniformLocation(colorSplatProgram, 'point'), pos.x, pos.y);
+                                
+                                // Trail fades as it gets older (oldest = most transparent)
+                                const fadeAmount = (index / previousPaintPositions.length) * 0.7; // 0 to 0.7
+                                
+                                gl.uniform3f(gl.getUniformLocation(colorSplatProgram, 'color'), 
+                                    secondaryVoice.color.r * injectionStrength * fadeAmount,
+                                    secondaryVoice.color.g * injectionStrength * fadeAmount,
+                                    secondaryVoice.color.b * injectionStrength * fadeAmount
+                                );
+                                gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'radius'), 0.002);
+                                
+                                gl.activeTexture(gl.TEXTURE0);
+                                gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
+                                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                                
+                                colorBuffer.swap();
+                            });
+                        }
+                        
+                        // Store current position for next frame's trail
+                        previousPaintPositions.push({ x: mouseX, y: mouseY });
+                        if (previousPaintPositions.length > MAX_TRAIL_LENGTH) {
+                            previousPaintPositions.shift(); // Remove oldest
+                        }
+                    }
+                    
+                    // Always paint PRIMARY color at CURRENT position (the head)
                     bindFramebuffer(colorBuffer.write);
                     gl.uniform1i(gl.getUniformLocation(colorSplatProgram, 'uTarget'), 0);
                     gl.uniform1f(gl.getUniformLocation(colorSplatProgram, 'aspectRatio'), canvas.width / canvas.height);
                     gl.uniform2f(gl.getUniformLocation(colorSplatProgram, 'point'), mouseX, mouseY);
                     
-                    const injectionStrength = 0.8;
                     gl.uniform3f(gl.getUniformLocation(colorSplatProgram, 'color'), 
                         voice.color.r * injectionStrength, 
                         voice.color.g * injectionStrength, 
@@ -4786,6 +4892,10 @@
                     }
                 } else {
                     lastColorIntensity *= 0.99;
+                    // Clear trail positions when not moving (ready for new stroke)
+                    if (previousPaintPositions.length > 0) {
+                        previousPaintPositions = [];
+                    }
                 }
                 
                 updateAudio();
