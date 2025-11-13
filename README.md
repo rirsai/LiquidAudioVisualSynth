@@ -1,13 +1,18 @@
-# Metallic Fluid WebGL Synth 🎨🎵
+# Daphne - Oramics Fluid Synth 🎨🎵
 
-An interactive audio-visual synthesizer that combines WebGL fluid simulation with music theory-based sound generation. Paint with colors that each have their own unique sound and musical personality.
+An interactive audio-visual synthesizer that combines WebGL fluid simulation with music theory-based sound generation, inspired by the pioneering electronic music work of **Daphne Oram** and her revolutionary Oramics technique.
 
 ## Overview
 
-This project is a **real-time audio-visual instrument** where:
-- **Visual**: WebGL-based fluid dynamics simulation responds to cursor movement
+**Daphne** is a **real-time audio-visual instrument** where:
+- **Visual**: WebGL-based fluid dynamics simulation responds to your gestures
 - **Audio**: Web Audio API generates musical sounds quantized to proper scales
-- **Interaction**: Each color represents a different musical scale and sonic texture
+- **Interaction**: Paint with colors that each have unique sound and musical personality
+- **Oramics**: Visual patterns directly control sound synthesis, inspired by Daphne Oram's technique of drawing sound onto film
+
+## Who Was Daphne Oram?
+
+Daphne Oram (1925-2003) was a British composer and electronic music pioneer who invented **Oramics** - a groundbreaking technique where visual patterns drawn on film strips would be read by photoelectric cells to control sound synthesis. She co-founded the BBC Radiophonic Workshop and created one of the first electronic music studios in the UK. This project honors her legacy by translating her vision of "drawn sound" into an interactive digital medium.
 
 ## Features
 
@@ -66,6 +71,23 @@ Five visual and audio manipulation effects:
 
 All glitches are **cursor-responsive** and can be layered for complex effects.
 
+### 🎵 Oramics Effects (Daphne Oram-Inspired)
+
+Four special effects inspired by Daphne Oram's pioneering Oramics technique, where visual gestures directly control sound synthesis:
+
+| Effect | Icon | Description |
+|--------|------|-------------|
+| **Painted Envelope** | ⟲ | Your gesture shape controls sound evolution - fast strokes create quick attacks, slow sustained gestures create long, evolving releases |
+| **Drawn Waveforms** | ∿ | Visual patterns on the canvas become the sound wave itself - the brightness and complexity of your painting directly shapes the timbre using Fourier synthesis |
+| **Pattern Sequencer** | ⊞ | Paint zones on the canvas that trigger notes when fluid flows through them - like a visual step sequencer where space becomes time |
+| **Gesture Drones** | 〰 | Sustained painting (hold mouse ~1 second) creates evolving ambient drone layers that slowly drift in pitch and filter - layer up to 6 simultaneous drones |
+
+**How Oramics Effects Work:**
+- **Painted Envelope**: Tracks your gesture velocity, path length, and duration to create dynamic envelopes (attack/release times)
+- **Drawn Waveforms**: Samples pixel brightness across the canvas and converts it into Fourier coefficients for PeriodicWave synthesis
+- **Pattern Sequencer**: Stores painted zones and monitors fluid velocity at those positions, triggering notes when flow is detected
+- **Gesture Drones**: Creates sustained oscillators with analog-style frequency drift and evolving lowpass filters (10-20 second lifetimes)
+
 ## Technical Architecture
 
 ### WebGL Fluid Simulation
@@ -73,12 +95,17 @@ All glitches are **cursor-responsive** and can be layered for complex effects.
 **Shaders:**
 - `advectionProgram`: Moves fluid based on velocity field
 - `diffusionProgram`: Spreads colors through the fluid
+- `divergenceProgram`: Calculates velocity field divergence
+- `pressureProgram`: Solves pressure to maintain incompressibility
+- `gradientSubtractProgram`: Makes fluid incompressible
 - `splatProgram`: Injects color and velocity at cursor position
 - `displayProgram`: Renders the final fluid to screen
 
 **Framebuffers:**
 - `velocity`: Stores fluid velocity vectors (double-buffered)
-- `dye`: Stores color information (double-buffered)
+- `colorBuffer`: Stores color information (double-buffered)
+- `pressure`: Pressure field for incompressibility
+- `divergence`: Velocity divergence field
 - Uses floating-point textures for smooth simulation
 
 **Parameters:**
@@ -93,12 +120,14 @@ All glitches are **cursor-responsive** and can be layered for complex effects.
 Oscillator → Envelope → Filter → [Glitches] → Panner → Dry/Wet Mix → Master → Output
                                                             ↓
                                                          Reverb
+                                                            ↓
+                                                    [Oramics Processing]
 ```
 
 **Audio Nodes:**
-- **Oscillators**: Generate base frequencies (sine, triangle, sawtooth)
-- **Envelopes**: Control volume over time (attack/release)
-- **Filters**: Shape frequency content (lowpass, highpass, bandpass)
+- **Oscillators**: Generate base frequencies (sine, triangle, sawtooth, custom PeriodicWave for Drawn Waveforms)
+- **Envelopes**: Control volume over time (attack/release, dynamically modified by Painted Envelope)
+- **Filters**: Shape frequency content (lowpass, highpass, bandpass, evolving for Gesture Drones)
 - **Effects**: Reverb, delay, distortion, bit crushing
 - **Panner**: Stereo positioning based on cursor X position
 
@@ -107,6 +136,64 @@ Oscillator → Envelope → Filter → [Glitches] → Panner → Dry/Wet Mix →
 - Ice crystals (Pink): Rapid high-frequency crackles with frozen resonance
 - Metal grinding (Red): Noise + modulated oscillators with heavy distortion
 - Crackles (Brown): Randomized short bursts for organic texture
+- Gesture Drones: Sub-octave oscillators with analog drift and evolving filters
+
+### Oramics Implementation Details
+
+**Painted Envelope:**
+```javascript
+// Gesture metrics tracked per frame:
+- gestureStartTime: When gesture began
+- gesturePathLength: Total distance traveled
+- gestureAvgVelocity: Average speed of movement
+- isGestureActive: Whether painting is happening
+
+// Envelope parameters dynamically adjusted:
+attackTime = 0.001 + (1.0 - velocityNorm) * 1.0  // 1ms to 1s
+soundRelease = 0.1 + (1.0 - velocityNorm) * 4.9  // 0.1s to 5s
+soundRelease *= pathLengthBoost  // Up to 3x
+soundRelease *= durationBoost    // Up to 2.5x
+```
+
+**Drawn Waveforms:**
+```javascript
+// Visual sampling and synthesis:
+1. Sample pixel brightness across horizontal line (256 samples)
+2. Convert brightness (0-1) to amplitude (-1 to 1)
+3. Use as Fourier coefficients for PeriodicWave
+4. Apply to oscillator for custom timbre
+
+// Creates real and imaginary Fourier components
+real[i] = visualValue * 0.5
+imag[i] = visualValue * 0.5
+periodicWave = audioContext.createPeriodicWave(real, imag)
+```
+
+**Pattern Sequencer:**
+```javascript
+// Spatial-temporal triggering:
+1. Mousedown stores zone: {x, y, color, lastTriggerTime}
+2. Every frame, read velocity texture from GPU
+3. Sample velocity magnitude at each zone position
+4. If velocity > 0.05, trigger note
+5. Cooldown of 500ms prevents note spam
+```
+
+**Gesture Drones:**
+```javascript
+// Ambient layer generation:
+1. Mousedown starts timer
+2. After 800ms sustained press, create drone
+3. Drone properties:
+   - Frequency: baseFreq / (2 + random)  // Sub-octave
+   - Type: 'triangle' for smooth timbre
+   - Filter: lowpass 400-1600 Hz
+   - Gain: 0 → 0.08 over 3 seconds (fade in)
+4. Evolution every frame:
+   - Frequency drift: ±10 Hz sine wave
+   - Filter sweep: 200-1400 Hz
+5. Auto-fade after 10-20 seconds
+```
 
 ### Music Theory Implementation
 
@@ -134,23 +221,24 @@ quantizePitch(mouseYPos)
 ## File Structure
 
 ```
-MetalicFluidWebGLSynth/
-├── index.html          # Single-file application (all code)
+Daphne/
+├── index.html          # Single-file application (all code ~4100 lines)
 ├── README.md           # This file
 └── .git/               # Git repository
 ```
 
-The entire application is contained in a single `index.html` file (~3300 lines) with:
-- HTML structure (lines 1-195)
-- CSS styling (lines 7-187)
-- JavaScript (lines 196-3325):
-  - WebGL setup and shaders (lines 196-400)
-  - Color voice definitions (lines 229-412)
-  - Musical quantization system (lines 423-515)
-  - Beat system (lines 517-599)
-  - Glitch effects (lines 405-761)
-  - Audio generation (lines 1848-2500+)
-  - Rendering loop (lines 2750-2900+)
+The entire application is contained in a single `index.html` file with:
+- HTML structure
+- CSS styling (modern UI with animations)
+- JavaScript:
+  - WebGL setup and shaders
+  - Color voice definitions with unique scales
+  - Musical quantization system
+  - Beat system with musical timing
+  - Glitch effects system
+  - Oramics effects system (Painted Envelope, Drawn Waveforms, Pattern Sequencer, Gesture Drones)
+  - Audio generation and synthesis
+  - Fluid simulation rendering loop
 
 ## How to Use
 
@@ -179,6 +267,12 @@ The entire application is contained in a single `index.html` file (~3300 lines) 
 - Effects respond to cursor movement
 - Can be combined for complex results
 
+**Oramics Effects:**
+- **Painted Envelope (⟲)**: Enable, then paint - gesture speed/length controls sound evolution
+- **Drawn Waveforms (∿)**: Enable, then paint patterns - visual complexity shapes timbre
+- **Pattern Sequencer (⊞)**: Enable, click to place zones, then paint to trigger them with fluid flow
+- **Gesture Drones (〰)**: Enable, hold mouse down ~1 second while painting to create ambient layers
+
 ### Performance Tips
 
 - **Cursor Speed**: Faster movement = more energetic sounds and visuals
@@ -188,19 +282,25 @@ The entire application is contained in a single `index.html` file (~3300 lines) 
 - **Layering**: Switch colors while painting to layer different scales
 - **Beats**: Start with kick, add hi-hat for groove
 - **Glitches**: Try one at a time first, then combine
+- **Oramics Workflow**:
+  - Start with Pattern Sequencer to create rhythmic triggers
+  - Add Gesture Drones for ambient bed
+  - Use Painted Envelope for expressive control
+  - Enable Drawn Waveforms for timbral variety
 
 ## Development
 
 ### Branch Structure
 
 - `main`: Stable releases with all features
-- `glitch-and-beat-system`: Development of glitch/beat features
-- `Harmony`: Music theory and quantization system (current)
+- `Harmony`: Music theory and quantization system (merged)
+- `glitch-and-beat-system`: Development of glitch/beat features (merged)
+- `ORAM1`: Oramics effects development (merged)
 
 ### Key Technologies
 
 - **WebGL**: Hardware-accelerated fluid simulation
-- **Web Audio API**: Real-time audio synthesis
+- **Web Audio API**: Real-time audio synthesis with PeriodicWave for custom waveforms
 - **Vanilla JavaScript**: No frameworks, pure web standards
 - **CSS3**: Modern styling with animations
 
@@ -219,6 +319,13 @@ musicalClock = {
     bpm: 120,           // Master tempo
     beatsPerBar: 4      // 4/4 time signature
 }
+
+oramicsEffects = {
+    paintedEnvelope: { active: false },
+    drawnWaveforms: { active: false },
+    patternSequencer: { active: false },
+    gestureDrones: { active: false }
+}
 ```
 
 ## Browser Compatibility
@@ -232,14 +339,22 @@ musicalClock = {
 **Requirements:**
 - WebGL support
 - Web Audio API support
-- Floating-point texture support
+- Floating-point texture support (for fluid simulation)
+- PeriodicWave support (for Drawn Waveforms)
 
-## Credits
+## Inspiration & Credits
+
+**Daphne** is inspired by:
+- **Daphne Oram** (1925-2003): Pioneer of electronic music and inventor of Oramics
+- **Oramics Technique**: Drawing sound onto 35mm film strips, read by photoelectric cells
+- **BBC Radiophonic Workshop**: Where early electronic music experimentation flourished
+- **Graphic Score Tradition**: Visual notation systems in experimental music
 
 Created as an exploration of interactive audio-visual synthesis combining:
 - Fluid dynamics simulation
 - Music theory and quantization
 - Real-time audio synthesis
+- Oramics-inspired gestural sound control
 - Glitch aesthetics
 
 ## License
@@ -248,5 +363,6 @@ This project is provided as-is for educational and creative purposes.
 
 ---
 
-**Version**: Harmony Branch (Musical Quantization System)  
-**Last Updated**: November 2025
+**Version**: 1.0 - Oramics Complete  
+**Last Updated**: November 13, 2025  
+**In Honor Of**: Daphne Oram, electronic music pioneer
