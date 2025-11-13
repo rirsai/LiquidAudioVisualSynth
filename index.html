@@ -420,12 +420,182 @@
             prismLayers: 5
         };
 
-        // ===== BEAT SYSTEM =====
+        // ===== MUSICAL QUANTIZATION SYSTEM =====
+        
+        /*
+         * WHAT IS QUANTIZATION?
+         * --------------------
+         * Quantization "snaps" frequencies to real musical notes, like snapping to a grid.
+         * Instead of playing 442Hz (slightly out of tune), it rounds to 440Hz (perfect A note).
+         * 
+         * WHY A440 STANDARD?
+         * - A440 means the note "A above middle C" vibrates at exactly 440 times per second
+         * - This is the universal tuning standard used by orchestras and musicians worldwide
+         * - All other notes are calculated relative to this anchor point
+         * 
+         * EQUAL TEMPERAMENT:
+         * - Each half-step (semitone) multiplies frequency by 2^(1/12) ≈ 1.059463
+         * - There are 12 semitones in an octave
+         * - Doubling frequency = going up one octave (A220 → A440 → A880)
+         */
+        
+        // Note names for reference (C0 = MIDI note 12, A4 = MIDI note 69 = 440Hz)
+        const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        
+        // Musical scales as intervals from root note (in semitones)
+        const SCALES = {
+            chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],  // All 12 notes
+            major: [0, 2, 4, 5, 7, 9, 11],  // Happy, bright (Do-Re-Mi-Fa-Sol-La-Ti)
+            minor: [0, 2, 3, 5, 7, 8, 10],  // Sad, emotional
+            pentatonic: [0, 2, 4, 7, 9],    // Can't play a wrong note! (black keys on piano)
+            blues: [0, 3, 5, 6, 7, 10],     // Bluesy, soulful
+            dorian: [0, 2, 3, 5, 7, 9, 10]  // Jazzy, sophisticated
+        };
+        
+        // Current musical settings
+        let musicalSettings = {
+            rootNote: 60,        // Middle C (MIDI note 60 = 261.63Hz)
+            scale: 'pentatonic', // Start with pentatonic - easiest to sound good!
+            octaveRange: 3       // How many octaves we can span
+        };
+        
+        /**
+         * Convert MIDI note number to frequency in Hz
+         * Formula: freq = 440 * 2^((midiNote - 69) / 12)
+         * Where 69 is the MIDI number for A440
+         */
+        function midiToFreq(midiNote) {
+            return 440 * Math.pow(2, (midiNote - 69) / 12);
+        }
+        
+        /**
+         * Convert frequency to nearest MIDI note number
+         */
+        function freqToMidi(freq) {
+            return Math.round(69 + 12 * Math.log2(freq / 440));
+        }
+        
+        /**
+         * QUANTIZE FREQUENCY TO MUSICAL NOTE
+         * This is the core function that makes frequencies musical!
+         * 
+         * @param {number} rawFreq - Any frequency (could be off-tune)
+         * @param {string} scaleName - Which scale to use (pentatonic, major, etc.)
+         * @param {number} rootNote - Root note of the scale (MIDI number)
+         * @returns {number} - Quantized frequency that fits the scale
+         */
+        function quantizeToScale(rawFreq, scaleName = 'pentatonic', rootNote = 60) {
+            // 1. Convert the raw frequency to a MIDI note number
+            const rawMidi = freqToMidi(rawFreq);
+            
+            // 2. Get the scale intervals
+            const scale = SCALES[scaleName] || SCALES.pentatonic;
+            
+            // 3. Find which octave we're in relative to the root
+            const noteInOctave = ((rawMidi - rootNote) % 12 + 12) % 12;
+            const octaveOffset = Math.floor((rawMidi - rootNote) / 12);
+            
+            // 4. Find the closest note in the scale
+            let closestInterval = scale[0];
+            let minDistance = Math.abs(noteInOctave - closestInterval);
+            
+            for (let interval of scale) {
+                const distance = Math.abs(noteInOctave - interval);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    closestInterval = interval;
+                }
+            }
+            
+            // 5. Calculate the final MIDI note (in the correct octave)
+            const quantizedMidi = rootNote + octaveOffset * 12 + closestInterval;
+            
+            // 6. Convert back to frequency
+            return midiToFreq(quantizedMidi);
+        }
+
+        // ===== MUSICAL RHYTHM SYSTEM =====
+        
+        /*
+         * MUSICAL TIME EXPLAINED:
+         * ----------------------
+         * Music is organized into beats and subdivisions:
+         * 
+         * TEMPO (BPM) = Beats Per Minute
+         * - 120 BPM means 120 quarter notes per minute = 2 per second
+         * - Standard dance music: 120-130 BPM
+         * - Standard hip-hop: 80-100 BPM
+         * 
+         * NOTE DIVISIONS:
+         * - Whole note = 4 beats (very slow)
+         * - Half note = 2 beats
+         * - Quarter note = 1 beat (the "pulse" of the song)
+         * - Eighth note = 0.5 beats (twice as fast)
+         * - Sixteenth note = 0.25 beats (four times as fast)
+         * 
+         * TIME SIGNATURE:
+         * - 4/4 means: 4 beats per measure, quarter note gets the beat
+         * - Most common in Western music
+         */
+        
+        // Master musical clock
+        let musicalClock = {
+            bpm: 120,              // Master tempo (beats per minute)
+            isPlaying: false,
+            startTime: 0,          // When the clock started
+            currentBeat: 0,        // Which beat we're on
+            beatsPerBar: 4,        // Time signature (4/4 time)
+            audioContext: null
+        };
+        
+        /**
+         * Calculate interval in milliseconds for a given note division
+         * @param {number} division - 1 = quarter note, 0.5 = eighth, 0.25 = sixteenth, 2 = half
+         */
+        function getMusicalInterval(division) {
+            const quarterNoteMs = (60 / musicalClock.bpm) * 1000;
+            return quarterNoteMs * division;
+        }
+        
+        // Beat system with MUSICAL subdivisions instead of random BPMs
         const beatEffects = {
-            kick: { active: false, name: 'Kick', icon: '●', bpm: 120, interval: null },
-            hihat: { active: false, name: 'Hi-Hat', icon: '×', bpm: 240, interval: null },
-            snare: { active: false, name: 'Snare', icon: '▬', bpm: 120, interval: null },
-            pulse: { active: false, name: 'Pulse', icon: '◉', bpm: 60, interval: null }
+            // Kick = Quarter notes (on the beat: 1, 2, 3, 4)
+            kick: { 
+                active: false, 
+                name: 'Kick', 
+                icon: '●', 
+                division: 1.0,     // Plays every quarter note
+                interval: null,
+                description: 'Quarter notes - on every beat'
+            },
+            // Hi-hat = Eighth notes (twice as fast: 1-and-2-and-3-and-4-and)
+            hihat: { 
+                active: false, 
+                name: 'Hi-Hat', 
+                icon: '×', 
+                division: 0.5,     // Plays every eighth note
+                interval: null,
+                description: 'Eighth notes - double time'
+            },
+            // Snare = Half notes (on beats 2 and 4 - the "backbeat")
+            snare: { 
+                active: false, 
+                name: 'Snare', 
+                icon: '▬', 
+                division: 2.0,     // Plays every half note
+                interval: null,
+                skipFirstBeat: true, // Skip beat 1, play on beat 3 for that backbeat feel
+                description: 'Backbeat - on beats 2 & 4'
+            },
+            // Pulse = Whole notes (every 4 beats - very slow)
+            pulse: { 
+                active: false, 
+                name: 'Pulse', 
+                icon: '◉', 
+                division: 4.0,     // Plays every whole note (once per bar)
+                interval: null,
+                description: 'Whole notes - once per bar'
+            }
         };
 
         function initColorPalette() {
@@ -489,14 +659,15 @@
             divider.className = 'glitch-divider';
             palette.appendChild(divider);
             
-            // Add beat buttons
+            // Add beat buttons with MUSICAL descriptions
             Object.keys(beatEffects).forEach((key) => {
                 const effect = beatEffects[key];
                 const btn = document.createElement('button');
                 btn.className = 'beat-btn';
                 btn.innerHTML = effect.icon;
                 btn.dataset.beat = key;
-                btn.title = `${effect.name} (${effect.bpm} BPM)`;
+                // Show musical timing instead of arbitrary BPM
+                btn.title = `${effect.name} - ${effect.description}`;
                 btn.addEventListener('click', () => toggleBeat(key, btn));
                 palette.appendChild(btn);
             });
@@ -516,12 +687,25 @@
         
         function startBeat(key, btn) {
             const beat = beatEffects[key];
-            const intervalMs = (60 / beat.bpm) * 1000;
+            
+            /*
+             * MUSICAL TIMING:
+             * Instead of using arbitrary BPM values, we calculate the interval
+             * based on musical note divisions (quarter, eighth, etc.)
+             * 
+             * For example:
+             * - If BPM = 120, one quarter note = 500ms
+             * - Eighth note (division 0.5) = 250ms
+             * - Half note (division 2.0) = 1000ms
+             * 
+             * This ensures all beats are musically related!
+             */
+            const intervalMs = getMusicalInterval(beat.division);
             
             // Trigger immediately
             triggerBeat(key, btn);
             
-            // Set up interval
+            // Set up interval using musical timing
             beat.interval = setInterval(() => {
                 triggerBeat(key, btn);
             }, intervalMs);
@@ -595,12 +779,26 @@
         function createBeatSound(key) {
             const now = audioContext.currentTime;
             
+            /*
+             * MUSICAL BEAT SOUNDS:
+             * Instead of random frequencies, beats now use musical notes
+             * based on the current scale and root note.
+             * This makes the rhythm section harmonize with the melodies!
+             */
+            
             if (key === 'kick') {
-                // Deep bass kick
+                /*
+                 * KICK DRUM:
+                 * - Uses the ROOT NOTE as its pitch (the foundation)
+                 * - Drops down one octave for deep bass (-12 semitones)
+                 * - Pitch slides down for that classic "thump" sound
+                 */
+                const rootFreq = midiToFreq(musicalSettings.rootNote - 12);  // One octave below root
+                
                 const osc = audioContext.createOscillator();
                 osc.type = 'sine';
-                osc.frequency.value = 60;
-                osc.frequency.exponentialRampToValueAtTime(30, now + 0.1);
+                osc.frequency.value = rootFreq;
+                osc.frequency.exponentialRampToValueAtTime(rootFreq * 0.5, now + 0.1);  // Slide down
                 
                 const env = audioContext.createGain();
                 env.gain.value = 0.4;
@@ -612,7 +810,12 @@
                 osc.stop(now + 0.3);
                 
             } else if (key === 'hihat') {
-                // High frequency noise
+                /*
+                 * HI-HAT:
+                 * - Pure noise (not pitched)
+                 * - High frequency for crisp, bright sound
+                 * - Very short duration for tight rhythm
+                 */
                 const bufferSize = audioContext.sampleRate * 0.05;
                 const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
                 const data = buffer.getChannelData(0);
@@ -637,15 +840,23 @@
                 noise.start(now);
                 
             } else if (key === 'snare') {
-                // Snare: tone + noise
+                /*
+                 * SNARE:
+                 * - Uses the FIFTH note of the scale (7 semitones up)
+                 * - The "fifth" is super stable and supportive in music
+                 * - Combines tone + noise for that classic snare "crack"
+                 */
+                const fifthFreq = midiToFreq(musicalSettings.rootNote + 7);  // Perfect fifth
+                
                 const osc = audioContext.createOscillator();
                 osc.type = 'triangle';
-                osc.frequency.value = 200;
+                osc.frequency.value = fifthFreq;
                 
                 const oscEnv = audioContext.createGain();
                 oscEnv.gain.value = 0.2;
                 oscEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
                 
+                // Noise component for "crack"
                 const bufferSize = audioContext.sampleRate * 0.1;
                 const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
                 const data = buffer.getChannelData(0);
@@ -670,10 +881,17 @@
                 noise.start(now);
                 
             } else if (key === 'pulse') {
-                // Pulse: soft sine tone
+                /*
+                 * PULSE:
+                 * - Uses the ROOT NOTE at its natural octave
+                 * - Soft, sustained tone that grounds the harmony
+                 * - With reverb for spacious, ambient feel
+                 */
+                const rootFreq = midiToFreq(musicalSettings.rootNote);
+                
                 const osc = audioContext.createOscillator();
                 osc.type = 'sine';
-                osc.frequency.value = 440;
+                osc.frequency.value = rootFreq;
                 
                 const env = audioContext.createGain();
                 env.gain.value = 0.08;
@@ -1485,13 +1703,6 @@
         let echoTone, echoGain, echoFilter;
         let lastColorIntensity = 0;
         
-        const SCALE = [
-            73.42, 87.31, 98.00, 110.00, 130.81,
-            146.83, 174.61, 196.00, 220.00, 261.63,
-            293.66, 349.23, 392.00, 440.00, 523.25,
-            587.33, 698.46, 783.99, 880.00, 1046.50
-        ];
-        
         function initAudio() {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
             
@@ -1505,6 +1716,12 @@
             convolver.connect(convolverGain);
             convolverGain.connect(masterGain);
             
+            /*
+             * REVERB IMPULSE RESPONSE:
+             * Creating a synthetic reverb that simulates sound bouncing in a space
+             * - Longer length = bigger space (4 seconds = cathedral-like)
+             * - The decay curve creates natural-sounding reflections
+             */
             const sampleRate = audioContext.sampleRate;
             const length = sampleRate * 4;
             const impulse = audioContext.createBuffer(2, length, sampleRate);
@@ -1517,12 +1734,18 @@
             }
             convolver.buffer = impulse;
             
+            /*
+             * ROOT DRONE:
+             * A subtle background tone that provides harmonic foundation
+             * - Plays the ROOT NOTE of our scale
+             * - Very quiet, just gives a sense of "key"
+             */
             rootGain = audioContext.createGain();
             rootGain.gain.value = 0.0;
             
             rootDrone = audioContext.createOscillator();
             rootDrone.type = 'sine';
-            rootDrone.frequency.value = SCALE[0];
+            rootDrone.frequency.value = midiToFreq(musicalSettings.rootNote - 12);  // Root note, one octave below
             
             const rootFilter = audioContext.createBiquadFilter();
             rootFilter.type = 'lowpass';
@@ -1534,6 +1757,12 @@
             rootGain.connect(convolver);
             rootDrone.start();
             
+            /*
+             * ECHO TONE:
+             * A second drone playing the FIFTH (7 semitones up)
+             * - The fifth is the most consonant interval after the octave
+             * - Together with the root, creates a stable, open sound
+             */
             echoGain = audioContext.createGain();
             echoGain.gain.value = 0.0;
             
@@ -1544,7 +1773,7 @@
             
             echoTone = audioContext.createOscillator();
             echoTone.type = 'sine';
-            echoTone.frequency.value = SCALE[5];
+            echoTone.frequency.value = midiToFreq(musicalSettings.rootNote - 5);  // Perfect fifth, one octave below
             
             echoTone.connect(echoFilter);
             echoFilter.connect(echoGain);
@@ -1554,9 +1783,41 @@
             audioEnabled = true;
         }
         
+        /**
+         * QUANTIZE PITCH FROM MOUSE POSITION
+         * This function converts cursor Y position into a musical note frequency
+         * 
+         * HOW IT WORKS:
+         * 1. Y position maps to a range of octaves (set by musicalSettings.octaveRange)
+         * 2. We calculate a continuous frequency across that range
+         * 3. We quantize it to the nearest note in the selected scale
+         * 4. Result: cursor movement = musical melody!
+         * 
+         * @param {number} mouseYPos - Cursor Y position (0 at top, 1 at bottom)
+         * @returns {number} - Quantized frequency in Hz
+         */
         function quantizePitch(mouseYPos) {
-            const scaleIndex = Math.floor((1 - mouseYPos) * (SCALE.length - 1));
-            return SCALE[Math.max(0, Math.min(SCALE.length - 1, scaleIndex))];
+            /*
+             * Map Y position to MIDI note range:
+             * - Top of screen (y=0) = high notes
+             * - Bottom of screen (y=1) = low notes
+             * - Range spans musicalSettings.octaveRange octaves (3 by default)
+             */
+            const octaves = musicalSettings.octaveRange;
+            const lowestNote = musicalSettings.rootNote - 12;  // One octave below root
+            const highestNote = lowestNote + (octaves * 12);   // Three octaves up
+            
+            // Invert Y so top = high pitch, bottom = low pitch
+            const normalizedY = 1 - mouseYPos;
+            
+            // Calculate the raw MIDI note (can be fractional, like 62.5)
+            const rawMidiNote = lowestNote + (normalizedY * (highestNote - lowestNote));
+            
+            // Convert to frequency, then quantize to scale
+            const rawFreq = midiToFreq(rawMidiNote);
+            const quantizedFreq = quantizeToScale(rawFreq, musicalSettings.scale, musicalSettings.rootNote);
+            
+            return quantizedFreq;
         }
 
         // COLOR VOICE AUDIO TRIGGER
