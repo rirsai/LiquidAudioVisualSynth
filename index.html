@@ -1997,6 +1997,25 @@
         const MAX_POSITIONS = 20;
         const MAX_VELOCITIES = 10;
 
+        // ===== GENERAL PAINTING VELOCITY TRACKING =====
+        /*
+         * Track painting speed for volume and brightness control
+         * Faster painting = louder and brighter sounds
+         */
+        let currentPaintingVelocity = 0;
+        let lastPaintingPos = { x: mouseX, y: mouseY };
+        let lastPaintingTime = Date.now();
+        let velocitySmoothing = 0.7; // Smooth velocity changes
+        
+        // ===== GESTURE CURVATURE TRACKING =====
+        /*
+         * Track how curved vs straight the gesture is
+         * Curved gestures create subtle timbral variations
+         */
+        let gestureCurvature = 0; // 0 = straight, 1 = very curved
+        let gestureHistory = []; // Last few positions
+        const MAX_GESTURE_HISTORY = 5;
+
         // ===== ORAMICS GESTURE TRACKING =====
         /*
          * Track gesture metrics for Painted Envelope effect
@@ -2015,8 +2034,8 @@
          * when fluid flows through them. Like a visual step sequencer!
          */
         let sequencerZones = []; // Array of {x, y, color, lastTriggerTime}
-        const ZONE_TRIGGER_COOLDOWN = 500; // ms between triggers
-        const ZONE_DETECTION_RADIUS = 0.05; // How close fluid needs to be
+        const ZONE_TRIGGER_COOLDOWN = 400; // ms between triggers (faster retriggering!)
+        const ZONE_DETECTION_RADIUS = 0.08; // How close fluid needs to be (wider detection!)
 
         // ===== GESTURE DRONES =====
         /*
@@ -2122,9 +2141,9 @@
                 filter.frequency.value = 400 + Math.random() * 1200;
                 filter.Q.value = 1 + Math.random() * 3;
 
-                // Start very quiet and fade in slowly
+                // Start very quiet and fade in slowly to a MORE AUDIBLE level
                 gain.gain.value = 0;
-                gain.gain.linearRampToValueAtTime(0.08, audioContext.currentTime + 3); // 3s fade in
+                gain.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 3); // 3s fade in (nearly 2x louder!)
 
                 // Connect: osc → filter → gain → master
                 osc.connect(filter);
@@ -2481,29 +2500,49 @@
             if (oramicsEffects.paintedEnvelope.active && isGestureActive) {
                 const gestureDuration = (Date.now() - gestureStartTime) / 1000; // in seconds
                 
-                // Map velocity to envelope speed - MORE DRAMATIC RANGE
-                // Fast velocity (>0.5) = INSTANT attack (0.001s), VERY SHORT release (0.1s) - SUPER PERCUSSIVE
-                // Slow velocity (<0.1) = VERY SLOW attack (1.0s), VERY LONG release (5.0s) - AMBIENT PAD
+                // Map velocity to envelope speed - EXTREMELY DRAMATIC RANGE
+                // Fast velocity (>0.5) = INSTANT attack (0.001s), VERY SHORT release (0.05s) - SUPER PERCUSSIVE
+                // Slow velocity (<0.1) = VERY SLOW attack (2.0s), EXTREMELY LONG release (8.0s) - AMBIENT PAD
                 const velocityNorm = Math.min(gestureAvgVelocity / 0.5, 1.0);
-                attackTime = 0.001 + (1.0 - velocityNorm) * 1.0; // 0.001s to 1.0s (2x range!)
-                soundRelease = 0.1 + (1.0 - velocityNorm) * 4.9; // 0.1s to 5.0s (much longer!)
+                attackTime = 0.001 + (1.0 - velocityNorm) * 2.0; // 0.001s to 2.0s (WIDER!)
+                soundRelease = 0.05 + (1.0 - velocityNorm) * 7.95; // 0.05s to 8.0s (MUCH LONGER!)
                 
-                // Path length affects sustain MORE DRAMATICALLY
+                // Path length affects sustain EXTREMELY DRAMATICALLY
                 // Short stroke = quick fade
                 // Long stroke = very sustained sound
-                const pathLengthBoost = Math.min(gesturePathLength / 0.3, 3.0); // Up to 3x boost
+                const pathLengthBoost = Math.min(gesturePathLength / 0.25, 4.0); // Up to 4x boost (wider!)
                 soundRelease *= pathLengthBoost;
                 
-                // Duration affects overall envelope curve MORE
-                // Longer gestures = much more sustained sounds
-                const durationBoost = Math.min(gestureDuration / 1.5, 2.5); // Up to 2.5x boost
+                // Duration affects overall envelope curve MUCH MORE
+                // Longer gestures = extremely sustained sounds
+                const durationBoost = Math.min(gestureDuration / 1.0, 3.5); // Up to 3.5x boost (wider!)
                 soundRelease *= durationBoost;
             }
             
             const duration = attackTime + soundRelease;
             
             const safeIntensity = Math.max(0, Math.min(colorIntensity || 0, 1.0));
-            const baseVolume = 0.04 * Math.min(safeIntensity * 3, 1.0);
+            let baseVolume = 0.04 * Math.min(safeIntensity * 3, 1.0);
+            
+            // ===== VELOCITY RESPONSIVE VOLUME & BRIGHTNESS =====
+            /*
+             * Faster painting = louder sound and brighter filter
+             * Makes the instrument feel more dynamic and expressive
+             */
+            // Normalize velocity to 0-1 range (0.5 is moderate speed, 2.0+ is very fast)
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5); // 0 to 1.5x multiplier
+            baseVolume *= (0.6 + velocityBoost * 0.4); // 60% base + up to 60% velocity boost = 0.6x to 1.2x
+            
+            // Store velocity for filter brightness adjustment (will be used after filter creation)
+            const filterBrightnessBoost = 1.0 + (velocityBoost * 0.8); // 1.0x to 1.8x brighter
+            
+            // ===== CURVATURE RESPONSIVE TIMBRE =====
+            /*
+             * Curved gestures add subtle harmonic variation
+             * Straight lines = pure tone, Curves = richer harmonics
+             */
+            const curvatureDetuneAmount = gestureCurvature * 8; // 0 to 8 cents detune (subtle)
+            const curvatureFilterMod = gestureCurvature * 0.15; // 0 to 15% filter modulation (subtle)
             
             if (!isFinite(baseVolume) || !isFinite(duration) || baseVolume <= 0) {
                 return;
@@ -2530,9 +2569,9 @@
                     // Map visual brightness to harmonic amplitudes
                     for (let i = 0; i < harmonicCount; i++) {
                         const visualValue = visualWaveformBuffer[Math.floor((i / harmonicCount) * visualWaveformBuffer.length)];
-                        // Emphasize the effect by amplifying the visual influence
-                        real[i] = visualValue * 0.5; // Cosine component
-                        imag[i] = visualValue * 0.5; // Sine component
+                        // MUCH more dramatic visual influence - paintings directly shape sound!
+                        real[i] = visualValue * 0.9; // Cosine component (nearly 2x stronger!)
+                        imag[i] = visualValue * 0.9; // Sine component (nearly 2x stronger!)
                     }
                     
                     const periodicWave = audioContext.createPeriodicWave(real, imag);
@@ -2544,7 +2583,10 @@
             }
             
             if (sound.detune) {
-                osc.detune.value = (Math.random() - 0.5) * sound.detune;
+                osc.detune.value = (Math.random() - 0.5) * sound.detune + curvatureDetuneAmount;
+            } else if (curvatureDetuneAmount > 0) {
+                // Apply curvature detune even if sound doesn't have natural detune
+                osc.detune.value = curvatureDetuneAmount;
             }
             
             if (sound.useModulation) {
@@ -3004,14 +3046,17 @@
             
             const filter = audioContext.createBiquadFilter();
             filter.type = sound.filterType;
-            filter.frequency.value = sound.filterFreq;
-            filter.Q.value = sound.filterQ;
+            // Apply velocity brightness boost - faster painting = brighter filter
+            filter.frequency.value = sound.filterFreq * filterBrightnessBoost;
+            // Apply curvature modulation - curved gestures add subtle filter wobble
+            filter.Q.value = sound.filterQ * (1.0 + curvatureFilterMod);
             
-            filter.frequency.linearRampToValueAtTime(sound.filterFreq * 1.5, now + duration * 0.3);
-            filter.frequency.linearRampToValueAtTime(sound.filterFreq * 0.8, now + duration);
+            // Animate filter with velocity-adjusted brightness
+            filter.frequency.linearRampToValueAtTime(sound.filterFreq * 1.5 * filterBrightnessBoost, now + duration * 0.3);
+            filter.frequency.linearRampToValueAtTime(sound.filterFreq * 0.8 * filterBrightnessBoost, now + duration);
             
             const panner = audioContext.createStereoPanner();
-            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2));
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6)); // Slightly more pronounced panning
             
             const dryGain = audioContext.createGain();
             const wetGain = audioContext.createGain();
@@ -3301,7 +3346,7 @@
             wetGain.gain.value = 0.3 + (horizontalPos * 0.5);
             
             const panner = audioContext.createStereoPanner();
-            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8));
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 2.4)); // Slightly more pronounced panning
             
             fundamental.connect(fundEnv);
             noise.connect(noiseFilter);
@@ -3368,7 +3413,7 @@
             noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + duration * 0.5);
             
             const panner = audioContext.createStereoPanner();
-            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8));
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 2.4)); // Slightly more pronounced panning
             
             osc.connect(env);
             noise.connect(noiseFilter);
@@ -3429,7 +3474,7 @@
             splashEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
             
             const panner = audioContext.createStereoPanner();
-            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2));
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6)); // Slightly more pronounced panning
             
             fundamental.connect(fundEnv);
             sparkle.connect(sparkleEnv);
@@ -3475,7 +3520,7 @@
             
             const panner = audioContext.createStereoPanner();
             const panOffset = (Math.random() - 0.5) * 0.6;
-            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 1.8 + panOffset));
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 2.4 + panOffset)); // Slightly more pronounced panning
             
             osc.connect(filter);
             filter.connect(env);
@@ -3510,7 +3555,7 @@
             env.gain.exponentialRampToValueAtTime(0.001, now + duration);
             
             const panner = audioContext.createStereoPanner();
-            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 2));
+            panner.pan.value = Math.max(-1, Math.min(1, (mouseX - 0.5) * 2.6)); // Slightly more pronounced panning
             
             noise.connect(filter);
             filter.connect(env);
@@ -3805,6 +3850,68 @@
                 }
             } else {
                 isGestureActive = false;
+            }
+            
+            // ===== GENERAL PAINTING VELOCITY & CURVATURE TRACKING =====
+            /*
+             * Track velocity and curvature for all painting (not just Oramics)
+             * Faster painting = louder/brighter sound
+             * Curved gestures = subtle timbral variation
+             */
+            const now = Date.now();
+            const timeDelta = (now - lastPaintingTime) / 1000; // seconds
+            const isMoving = Math.abs(deltaX) > 0.01 || Math.abs(deltaY) > 0.01;
+            
+            if (isMoving && timeDelta > 0) {
+                // Calculate instantaneous velocity
+                const distance = Math.sqrt(
+                    Math.pow(mouseX - lastPaintingPos.x, 2) + 
+                    Math.pow(mouseY - lastPaintingPos.y, 2)
+                );
+                const instantVelocity = distance / timeDelta;
+                
+                // Smooth velocity using exponential moving average
+                currentPaintingVelocity = (currentPaintingVelocity * velocitySmoothing) + 
+                                         (instantVelocity * (1 - velocitySmoothing));
+                
+                // Track gesture history for curvature detection
+                gestureHistory.push({ x: mouseX, y: mouseY, time: now });
+                if (gestureHistory.length > MAX_GESTURE_HISTORY) {
+                    gestureHistory.shift(); // Remove oldest
+                }
+                
+                // Calculate curvature if we have enough history
+                if (gestureHistory.length >= 3) {
+                    // Measure angle changes between consecutive segments
+                    let totalAngleChange = 0;
+                    for (let i = 1; i < gestureHistory.length - 1; i++) {
+                        const p1 = gestureHistory[i - 1];
+                        const p2 = gestureHistory[i];
+                        const p3 = gestureHistory[i + 1];
+                        
+                        // Calculate angles
+                        const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                        const angle2 = Math.atan2(p3.y - p2.y, p3.x - p2.x);
+                        
+                        // Angle change (in radians)
+                        let angleDiff = Math.abs(angle2 - angle1);
+                        if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+                        
+                        totalAngleChange += angleDiff;
+                    }
+                    
+                    // Normalize to 0-1 range (0 = straight, 1 = very curved)
+                    gestureCurvature = Math.min(totalAngleChange / Math.PI, 1.0);
+                } else {
+                    gestureCurvature = 0;
+                }
+                
+                lastPaintingPos = { x: mouseX, y: mouseY };
+                lastPaintingTime = now;
+            } else {
+                // Gradually decay velocity when not moving
+                currentPaintingVelocity *= 0.95;
+                gestureCurvature *= 0.95;
             }
             
             // ===== DRAWN WAVEFORMS UPDATE =====
@@ -4111,8 +4218,8 @@
                         const velocityMagnitude = Math.sqrt(vx * vx + vy * vy);
                         
                         // If fluid is flowing through this zone, trigger a note!
-                        if (velocityMagnitude > 0.05) { // Threshold for "flow"
-                            triggerColorVoice(zone.color, zone.x, zone.y, 0.15);
+                        if (velocityMagnitude > 0.03) { // Lower threshold = more sensitive triggering!
+                            triggerColorVoice(zone.color, zone.x, zone.y, 0.2); // Slightly louder too!
                             zone.lastTriggerTime = now;
                             console.log('⊞ Sequencer triggered:', zone.color);
                         }
