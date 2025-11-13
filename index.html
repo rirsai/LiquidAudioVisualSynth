@@ -184,6 +184,45 @@
             50% { transform: scale(1.3); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9), 0 0 20px rgba(255, 255, 255, 0.9); }
             100% { transform: scale(1.1); }
         }
+        
+        /* Oramics Buttons */
+        .oramics-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 0.75pt solid rgba(255, 255, 255, 0.3);
+            background: rgba(0, 0, 0, 0.4);
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            padding: 0;
+            flex-shrink: 0;
+        }
+        
+        .oramics-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.6);
+            transform: scale(1.1);
+        }
+        
+        .oramics-btn.active {
+            background: rgba(0, 0, 0, 0.8);
+            border-color: white;
+            border-width: 1.5pt;
+            color: white;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.9), 0 0 12px rgba(255, 255, 255, 0.6);
+            transform: scale(1.1);
+        }
+        
+        @keyframes oramicsPulse {
+            0% { transform: scale(1.1) rotate(0deg); }
+            50% { transform: scale(1.15) rotate(180deg); }
+            100% { transform: scale(1.1) rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -613,6 +652,38 @@
             }
         };
 
+        // ===== ORAMICS EFFECTS SYSTEM (Daphne Oram-inspired) =====
+        /*
+         * Inspired by Daphne Oram's pioneering Oramics technique
+         * where visual gestures directly control sound synthesis
+         */
+        const oramicsEffects = {
+            paintedEnvelope: {
+                active: false,
+                name: 'Painted Envelope',
+                icon: '⟲', // Swirl icon
+                description: 'Gesture shape controls sound evolution'
+            },
+            drawnWaveforms: {
+                active: false,
+                name: 'Drawn Waveforms',
+                icon: '∿', // Sine wave icon
+                description: 'Visual patterns become sound waves (Oramics)'
+            },
+            patternSequencer: {
+                active: false,
+                name: 'Pattern Sequencer',
+                icon: '⊞', // Grid icon
+                description: 'Paint zones trigger notes as fluid flows through'
+            },
+            gestureDrones: {
+                active: false,
+                name: 'Gesture Drones',
+                icon: '〰', // Wave/drone icon
+                description: 'Sustained painting creates evolving ambient layers'
+            }
+        };
+
         function initColorPalette() {
             const palette = document.getElementById('colorPalette');
             colorVoices.forEach((voice, index) => {
@@ -746,6 +817,34 @@
             if (audioEnabled && audioContext) {
                 createBeatSound(key);
             }
+        }
+        
+        // ===== ORAMICS FUNCTIONS =====
+        
+        function initOramicsPanel() {
+            const palette = document.getElementById('colorPalette');
+            
+            // Add divider
+            const divider = document.createElement('div');
+            divider.className = 'glitch-divider';
+            palette.appendChild(divider);
+            
+            // Add Oramics buttons
+            Object.keys(oramicsEffects).forEach((key) => {
+                const effect = oramicsEffects[key];
+                const btn = document.createElement('button');
+                btn.className = 'oramics-btn';
+                btn.innerHTML = effect.icon;
+                btn.dataset.oramics = key;
+                btn.title = `${effect.name} - ${effect.description}`;
+                btn.addEventListener('click', () => toggleOramics(key, btn));
+                palette.appendChild(btn);
+            });
+        }
+        
+        function toggleOramics(key, btn) {
+            oramicsEffects[key].active = !oramicsEffects[key].active;
+            btn.classList.toggle('active', oramicsEffects[key].active);
         }
         
         function createBeatSplat(key) {
@@ -927,52 +1026,116 @@
             
             let output = audioNodes.output;
             const cursorVelocity = Math.sqrt(mouseVelX * mouseVelX + mouseVelY * mouseVelY);
+            const now = audioContext.currentTime;
             
-            // Bit Crusher - EXTREME audio bit crushing
+            /*
+             * ═══════════════════════════════════════════════════════════
+             * BIT CRUSH (◼) - DIGITAL DEGRADATION TEXTURE
+             * ═══════════════════════════════════════════════════════════
+             * Visual: Pixelated, blocky, quantized
+             * Sound: Sample rate reduction, digital aliasing, steppy texture
+             */
             if (glitchEffects.bitCrush.active) {
+                // 1. BIT DEPTH REDUCTION (amplitude quantization)
                 const bitCrusher = audioContext.createWaveShaper();
                 const curve = new Float32Array(256);
-                // EXTREME: Much more aggressive bit depth
+                // Cursor velocity makes it MORE crushed (faster = more lo-fi)
                 const dynamicDepth = Math.max(1, glitchState.bitCrushDepth - cursorVelocity * 30);
                 const step = Math.pow(2, dynamicDepth);
                 for (let i = 0; i < 256; i++) {
                     const x = (i / 128) - 1;
                     const crushed = Math.round(x * step) / step;
-                    // Add random glitch artifacts (5% chance of corruption)
+                    // Random digital artifacts (like corrupted samples)
                     curve[i] = Math.random() < 0.95 ? crushed : crushed * (Math.random() * 2 - 1);
                 }
                 bitCrusher.curve = curve;
                 
-                // Add distortion for more aggressive sound
-                const distortion = audioContext.createWaveShaper();
-                const distCurve = new Float32Array(256);
-                for (let i = 0; i < 256; i++) {
-                    const x = (i / 128) - 1;
-                    distCurve[i] = Math.tanh(x * 3); // Heavy distortion
-                }
-                distortion.curve = distCurve;
+                // 2. SAMPLE RATE REDUCTION EFFECT (aliasing artifacts)
+                // Create high-frequency "fizz" that comes from downsampling
+                const aliasingFilter = audioContext.createBiquadFilter();
+                aliasingFilter.type = 'highpass';
+                aliasingFilter.frequency.value = 8000 - cursorVelocity * 6000; // Velocity adds more aliasing
+                aliasingFilter.Q.value = 0.5;
                 
+                // 3. DIGITAL NOISE LAYER (like digital compression artifacts)
+                const noiseBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.1, audioContext.sampleRate);
+                const noiseData = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < noiseData.length; i++) {
+                    // Steppy digital noise (not smooth analog noise)
+                    noiseData[i] = Math.round((Math.random() * 2 - 1) * 4) / 4;
+                }
+                const noiseSource = audioContext.createBufferSource();
+                noiseSource.buffer = noiseBuffer;
+                noiseSource.loop = true;
+                const noiseGain = audioContext.createGain();
+                noiseGain.gain.value = 0.03 * (1 + cursorVelocity); // Velocity adds more digital grit
+                noiseSource.connect(noiseGain);
+                noiseGain.connect(output.context.destination);
+                noiseSource.start(now);
+                
+                // Connect the chain
                 output.connect(bitCrusher);
-                bitCrusher.connect(distortion);
-                output = distortion;
+                bitCrusher.connect(aliasingFilter);
+                output = aliasingFilter;
             }
             
-            // Feedback - cursor speed controls feedback amount
+            /*
+             * ═══════════════════════════════════════════════════════════
+             * FEEDBACK (↻) - TAPE ECHO TEXTURE
+             * ═══════════════════════════════════════════════════════════
+             * Visual: Smooth trails, motion blur
+             * Sound: Warm tape delay, pitch drift, evolving echoes
+             */
             if (glitchEffects.feedback.active) {
+                // 1. TAPE-STYLE DELAY (smooth, warm echoes)
                 const feedbackDelay = audioContext.createDelay();
                 const feedbackGain = audioContext.createGain();
-                // Cursor position controls delay time
-                feedbackDelay.delayTime.value = 0.05 + mouseY * 0.15;
-                // Cursor velocity controls feedback intensity
+                // Cursor Y position controls delay time (like tape speed)
+                feedbackDelay.delayTime.value = 0.05 + mouseY * 0.2;
+                // Cursor velocity controls feedback intensity (faster = more echoes)
                 feedbackGain.gain.value = glitchState.feedbackAmount * (1 + cursorVelocity * 2);
                 
+                // 2. TAPE SATURATION (warm analog compression)
+                const tapeDistortion = audioContext.createWaveShaper();
+                const tapeCurve = new Float32Array(256);
+                for (let i = 0; i < 256; i++) {
+                    const x = (i / 128) - 1;
+                    // Soft clipping like analog tape
+                    tapeCurve[i] = Math.tanh(x * 1.5);
+                }
+                tapeDistortion.curve = tapeCurve;
+                
+                // 3. PITCH DRIFT (each echo slightly changes pitch - like wow & flutter)
+                const pitchMod = audioContext.createOscillator();
+                pitchMod.frequency.value = 0.3; // Slow drift
+                const pitchModGain = audioContext.createGain();
+                pitchModGain.gain.value = 0.02; // Subtle pitch variation
+                pitchMod.connect(pitchModGain);
+                pitchModGain.connect(feedbackDelay.delayTime);
+                pitchMod.start(now);
+                
+                // 4. FILTER FEEDBACK (echoes get darker over time)
+                const feedbackFilter = audioContext.createBiquadFilter();
+                feedbackFilter.type = 'lowpass';
+                feedbackFilter.frequency.value = 2000 - cursorVelocity * 1000; // Velocity makes it darker
+                feedbackFilter.Q.value = 1.5;
+                
+                // Connect the feedback chain
                 output.connect(feedbackDelay);
-                feedbackDelay.connect(feedbackGain);
-                feedbackGain.connect(feedbackDelay);
-                output = feedbackDelay;
+                feedbackDelay.connect(tapeDistortion);
+                tapeDistortion.connect(feedbackFilter);
+                feedbackFilter.connect(feedbackGain);
+                feedbackGain.connect(feedbackDelay); // Create the feedback loop
+                output = feedbackFilter;
             }
             
-            // Corrupt - cursor position triggers corruption
+            /*
+             * ═══════════════════════════════════════════════════════════
+             * CORRUPT (◆) - DATA CORRUPTION TEXTURE
+             * ═══════════════════════════════════════════════════════════
+             * Visual: Color inversion, random velocity spikes
+             * Sound: Granular chaos, amplitude glitches, buffer corruption
+             */
             if (glitchEffects.corrupt.active) {
                 // More corruption near edges and with fast movement
                 const edgeProximity = Math.max(
@@ -981,40 +1144,208 @@
                 ) * 2;
                 const corruptChance = glitchState.corruptionRate * (1 + edgeProximity + cursorVelocity * 5);
                 
+                // 1. PITCH CORRUPTION (sudden frequency jumps)
                 if (Math.random() < corruptChance) {
                     audioNodes.oscillators.forEach(osc => {
                         if (osc && osc.frequency) {
                             const jump = Math.random() > 0.5 ? 2 : 0.5;
-                            osc.frequency.setValueAtTime(osc.frequency.value * jump, audioContext.currentTime);
-                            osc.frequency.exponentialRampToValueAtTime(osc.frequency.value / jump, audioContext.currentTime + 0.05);
+                            osc.frequency.setValueAtTime(osc.frequency.value * jump, now);
+                            osc.frequency.exponentialRampToValueAtTime(osc.frequency.value / jump, now + 0.05);
                         }
                     });
                 }
+                
+                // 2. AMPLITUDE GLITCHES (sudden volume spikes/drops)
+                const glitchGate = audioContext.createGain();
+                const glitchRate = 10 + cursorVelocity * 50; // Faster movement = more glitches
+                const glitchLFO = audioContext.createOscillator();
+                glitchLFO.frequency.value = glitchRate;
+                glitchLFO.type = 'square'; // Hard on/off glitches
+                const glitchDepth = audioContext.createGain();
+                glitchDepth.gain.value = 0.5; // Amount of volume modulation
+                glitchLFO.connect(glitchDepth);
+                glitchDepth.connect(glitchGate.gain);
+                glitchLFO.start(now);
+                
+                // 3. BUFFER CORRUPTION (random audio fragments)
+                const corruptionNoise = audioContext.createBufferSource();
+                const corruptBuffer = audioContext.createBuffer(1, audioContext.sampleRate * 0.05, audioContext.sampleRate);
+                const corruptData = corruptBuffer.getChannelData(0);
+                for (let i = 0; i < corruptData.length; i++) {
+                    // Random bursts (like corrupted buffer reads)
+                    corruptData[i] = Math.random() < 0.1 ? (Math.random() * 2 - 1) : 0;
+                }
+                corruptionNoise.buffer = corruptBuffer;
+                corruptionNoise.loop = true;
+                const corruptionGain = audioContext.createGain();
+                corruptionGain.gain.value = 0.05 * (1 + cursorVelocity * 2);
+                corruptionNoise.connect(corruptionGain);
+                corruptionGain.connect(output.context.destination);
+                corruptionNoise.start(now);
+                
+                // Connect glitch gate
+                output.connect(glitchGate);
+                output = glitchGate;
             }
             
-            // RGB Split - affects audio panning based on cursor position
-            if (glitchEffects.rgbSplit.active && audioNodes.panner) {
-                // Cursor X position controls extreme panning
-                const panAmount = (mouseX - 0.5) * 3; // Exaggerated panning
-                audioNodes.panner.pan.value = Math.max(-1, Math.min(1, panAmount));
+            /*
+             * ═══════════════════════════════════════════════════════════
+             * RGB SPLIT (▣) - SPECTRAL PRISM TEXTURE
+             * ═══════════════════════════════════════════════════════════
+             * Visual: Colors split into rainbow layers
+             * Sound: Frequency splitting, spectral chorus, spatial spread
+             */
+            if (glitchEffects.rgbSplit.active) {
+                // 1. FREQUENCY BAND SPLITTING (like light through prism)
+                // Bass = Left, Mids = Center, Highs = Right
+                const lowSplit = audioContext.createBiquadFilter();
+                lowSplit.type = 'lowpass';
+                lowSplit.frequency.value = 300;
+                const lowPan = audioContext.createStereoPanner();
+                lowPan.pan.value = -0.7; // Left
+                
+                const midSplit = audioContext.createBiquadFilter();
+                midSplit.type = 'bandpass';
+                midSplit.frequency.value = 1000;
+                midSplit.Q.value = 1.0;
+                const midPan = audioContext.createStereoPanner();
+                midPan.pan.value = 0; // Center
+                
+                const highSplit = audioContext.createBiquadFilter();
+                highSplit.type = 'highpass';
+                highSplit.frequency.value = 3000;
+                const highPan = audioContext.createStereoPanner();
+                highPan.pan.value = 0.7; // Right
+                
+                // 2. SPECTRAL CHORUS (multiple detuned copies - shimmer effect)
+                const chorus1 = audioContext.createOscillator();
+                const chorus2 = audioContext.createOscillator();
+                chorus1.frequency.value = 5; // Chorus rate
+                chorus2.frequency.value = 7;
+                const chorusDepth1 = audioContext.createGain();
+                const chorusDepth2 = audioContext.createGain();
+                chorusDepth1.gain.value = 5;
+                chorusDepth2.gain.value = 8;
+                
+                // Cursor velocity controls shimmer intensity
+                const chorusMix = audioContext.createGain();
+                chorusMix.gain.value = 0.3 * (1 + cursorVelocity);
+                
+                chorus1.connect(chorusDepth1);
+                chorus2.connect(chorusDepth2);
+                chorus1.start(now);
+                chorus2.start(now);
+                
+                // 3. RAINBOW RESONANCE (add sparkle to each frequency band)
+                const lowResonance = audioContext.createBiquadFilter();
+                lowResonance.type = 'peaking';
+                lowResonance.frequency.value = 200;
+                lowResonance.Q.value = 5;
+                lowResonance.gain.value = 3;
+                
+                const highResonance = audioContext.createBiquadFilter();
+                highResonance.type = 'peaking';
+                highResonance.frequency.value = 5000;
+                highResonance.Q.value = 5;
+                highResonance.gain.value = 3;
+                
+                // Connect the spectral split chain
+                const merger = audioContext.createChannelMerger(2);
+                
+                output.connect(lowSplit);
+                lowSplit.connect(lowResonance);
+                lowResonance.connect(lowPan);
+                lowPan.connect(merger, 0, 0);
+                
+                output.connect(midSplit);
+                midSplit.connect(midPan);
+                midPan.connect(merger, 0, 0);
+                
+                output.connect(highSplit);
+                highSplit.connect(highResonance);
+                highResonance.connect(highPan);
+                highPan.connect(merger, 0, 1);
+                
+                output = merger;
+                
+                // Cursor X position adds extra panning
+                if (audioNodes.panner) {
+                    const panAmount = (mouseX - 0.5) * 2;
+                    audioNodes.panner.pan.value = Math.max(-1, Math.min(1, panAmount));
+                }
             }
             
-            // Freeze - freezes at cursor position
+            /*
+             * ═══════════════════════════════════════════════════════════
+             * FREEZE (❄) - CRYSTALLINE TIME-STOP TEXTURE
+             * ═══════════════════════════════════════════════════════════
+             * Visual: Darkened fluid, icy blue tint, stopped motion
+             * Sound: Granular freeze, crystalline shimmer, suspended time
+             */
             if (glitchEffects.freeze.active) {
                 if (!glitchState.freezeFrame) {
                     // Freeze based on cursor Y position
                     const freezeFreq = 200 + mouseY * 1000;
                     glitchState.freezeFrame = {
                         frequency: freezeFreq,
-                        time: audioContext.currentTime
+                        time: now
                     };
                     // Apply frozen frequency
                     audioNodes.oscillators.forEach(osc => {
                         if (osc && osc.frequency) {
-                            osc.frequency.setValueAtTime(freezeFreq, audioContext.currentTime);
+                            osc.frequency.setValueAtTime(freezeFreq, now);
                         }
                     });
                 }
+                
+                // 1. CRYSTALLINE SHIMMER (high bell-like overtones)
+                const crystalOsc1 = audioContext.createOscillator();
+                const crystalOsc2 = audioContext.createOscillator();
+                const crystalOsc3 = audioContext.createOscillator();
+                crystalOsc1.frequency.value = glitchState.freezeFrame.frequency * 8;
+                crystalOsc2.frequency.value = glitchState.freezeFrame.frequency * 12;
+                crystalOsc3.frequency.value = glitchState.freezeFrame.frequency * 16;
+                crystalOsc1.type = 'sine';
+                crystalOsc2.type = 'sine';
+                crystalOsc3.type = 'sine';
+                
+                const crystalGain = audioContext.createGain();
+                crystalGain.gain.value = 0.02; // Subtle shimmer layer
+                crystalOsc1.connect(crystalGain);
+                crystalOsc2.connect(crystalGain);
+                crystalOsc3.connect(crystalGain);
+                crystalGain.connect(output.context.destination);
+                crystalOsc1.start(now);
+                crystalOsc2.start(now);
+                crystalOsc3.start(now);
+                
+                // 2. FROZEN REVERB (infinite, non-decaying reverb)
+                const freezeReverb = audioContext.createConvolver();
+                const freezeReverbBuffer = audioContext.createBuffer(2, audioContext.sampleRate * 8, audioContext.sampleRate);
+                const freezeL = freezeReverbBuffer.getChannelData(0);
+                const freezeR = freezeReverbBuffer.getChannelData(1);
+                for (let i = 0; i < freezeL.length; i++) {
+                    // Very slow decay - sound hangs in the air
+                    freezeL[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / freezeL.length, 0.5);
+                    freezeR[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / freezeR.length, 0.5);
+                }
+                freezeReverb.buffer = freezeReverbBuffer;
+                
+                const freezeReverbGain = audioContext.createGain();
+                freezeReverbGain.gain.value = 0.6; // Strong reverb presence
+                
+                // 3. ICE FILTER (high resonance for glass-like quality)
+                const iceFilter = audioContext.createBiquadFilter();
+                iceFilter.type = 'highpass';
+                iceFilter.frequency.value = 2000;
+                iceFilter.Q.value = 8; // High resonance = crystalline
+                
+                // Connect freeze chain
+                output.connect(iceFilter);
+                iceFilter.connect(freezeReverb);
+                freezeReverb.connect(freezeReverbGain);
+                freezeReverbGain.connect(output.context.destination);
+                
             } else {
                 glitchState.freezeFrame = null;
             }
@@ -1666,6 +1997,229 @@
         const MAX_POSITIONS = 20;
         const MAX_VELOCITIES = 10;
 
+        // ===== ORAMICS GESTURE TRACKING =====
+        /*
+         * Track gesture metrics for Painted Envelope effect
+         * Inspired by Daphne Oram's Oramics - where the physical gesture
+         * shape directly controls the sound envelope
+         */
+        let gestureStartTime = 0;
+        let gesturePathLength = 0;
+        let gestureAvgVelocity = 0;
+        let isGestureActive = false;
+        let lastGesturePos = { x: 0, y: 0 };
+
+        // ===== PATTERN SEQUENCER ZONES =====
+        /*
+         * Pattern Sequencer: Paint zones on canvas that trigger notes
+         * when fluid flows through them. Like a visual step sequencer!
+         */
+        let sequencerZones = []; // Array of {x, y, color, lastTriggerTime}
+        const ZONE_TRIGGER_COOLDOWN = 500; // ms between triggers
+        const ZONE_DETECTION_RADIUS = 0.05; // How close fluid needs to be
+
+        // ===== GESTURE DRONES =====
+        /*
+         * Gesture Drones: Sustained painting creates evolving ambient layers
+         * that continue playing and morphing over time
+         */
+        let activeDrones = []; // Array of {osc, gain, color, startTime}
+        const MAX_DRONES = 6; // Maximum simultaneous drones
+        let droneStartTime = 0;
+        const DRONE_ACTIVATION_TIME = 800; // ms of sustained painting to start drone
+
+        // ===== DRAWN WAVEFORMS (ORAMICS) =====
+        /*
+         * Read visual pattern from screen and convert to audio waveform
+         * Like Oram's photoelectric film reader
+         */
+        let visualWaveformBuffer = null;
+        let lastWaveformUpdateTime = 0;
+        const WAVEFORM_UPDATE_RATE = 100; // Update every 100ms
+
+        /**
+         * Sample visual brightness across a horizontal line
+         * Convert pixel brightness → audio amplitude
+         * This is the core Oramics technique!
+         */
+        function sampleVisualWaveform() {
+            if (!gl || !colorBuffer) return null;
+
+            const sampleCount = 256; // Number of samples for waveform (powers of 2 work best)
+            const waveformData = new Float32Array(sampleCount);
+            
+            // Read pixels from the middle horizontal line of the canvas
+            const scanY = Math.floor(canvas.height * 0.5);
+            const pixels = new Uint8Array(canvas.width * 4); // RGBA
+            
+            try {
+                // Read pixel data from canvas
+                gl.readPixels(0, scanY, canvas.width, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                
+                // Convert pixel brightness to waveform amplitude
+                for (let i = 0; i < sampleCount; i++) {
+                    const pixelIndex = Math.floor((i / sampleCount) * canvas.width);
+                    const pixelOffset = pixelIndex * 4;
+                    
+                    // Calculate brightness from RGB (perceived luminance)
+                    const r = pixels[pixelOffset] / 255;
+                    const g = pixels[pixelOffset + 1] / 255;
+                    const b = pixels[pixelOffset + 2] / 255;
+                    const brightness = (r * 0.299 + g * 0.587 + b * 0.114);
+                    
+                    // Convert brightness (0-1) to audio amplitude (-1 to 1)
+                    waveformData[i] = (brightness * 2) - 1;
+                }
+                
+                return waveformData;
+            } catch (e) {
+                console.log('Could not read visual waveform:', e);
+                return null;
+            }
+        }
+
+        /**
+         * Create audio buffer from visual waveform data
+         */
+        function createWaveformBuffer(waveformData) {
+            if (!audioContext || !waveformData) return null;
+            
+            const buffer = audioContext.createBuffer(1, waveformData.length, audioContext.sampleRate);
+            const channelData = buffer.getChannelData(0);
+            
+            // Copy waveform data to audio buffer
+            for (let i = 0; i < waveformData.length; i++) {
+                channelData[i] = waveformData[i];
+            }
+            
+            return buffer;
+        }
+
+        // ===== GESTURE DRONE FUNCTIONS =====
+        /**
+         * Create a new evolving ambient drone layer
+         * Drones slowly morph in frequency and filter over time
+         */
+        function createDrone(color, position) {
+            if (!audioContext || activeDrones.length >= MAX_DRONES) return;
+
+            try {
+                // Create oscillator for drone base
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+                const filter = audioContext.createBiquadFilter();
+
+                // Get frequency from color
+                const freq = getColorFrequency(color);
+                
+                // Drones are pitched down an octave or two for ambient feel
+                const droneFreq = freq / (2 + Math.random()); // Random sub-octave
+                osc.frequency.value = droneFreq;
+                osc.type = 'triangle'; // Smooth timbre for drones
+
+                // Setup filter for evolving texture
+                filter.type = 'lowpass';
+                filter.frequency.value = 400 + Math.random() * 1200;
+                filter.Q.value = 1 + Math.random() * 3;
+
+                // Start very quiet and fade in slowly
+                gain.gain.value = 0;
+                gain.gain.linearRampToValueAtTime(0.08, audioContext.currentTime + 3); // 3s fade in
+
+                // Connect: osc → filter → gain → master
+                osc.connect(filter);
+                filter.connect(gain);
+                gain.connect(masterGain);
+
+                osc.start();
+
+                // Store drone info
+                const drone = {
+                    osc,
+                    gain,
+                    filter,
+                    color,
+                    startTime: Date.now(),
+                    baseFreq: droneFreq,
+                    position
+                };
+                activeDrones.push(drone);
+
+                console.log('🎵 Drone created:', color, 'at', droneFreq.toFixed(1), 'Hz');
+
+                // Auto-fade out after 10-20 seconds
+                const lifetime = 10000 + Math.random() * 10000;
+                setTimeout(() => removeDrone(drone), lifetime);
+
+            } catch (e) {
+                console.log('Could not create drone:', e);
+            }
+        }
+
+        /**
+         * Remove a drone with smooth fade out
+         */
+        function removeDrone(drone) {
+            if (!drone || !drone.gain) return;
+
+            try {
+                const fadeTime = audioContext.currentTime + 2;
+                drone.gain.gain.linearRampToValueAtTime(0, fadeTime);
+
+                setTimeout(() => {
+                    if (drone.osc) drone.osc.stop();
+                    if (drone.osc) drone.osc.disconnect();
+                    if (drone.filter) drone.filter.disconnect();
+                    if (drone.gain) drone.gain.disconnect();
+                    
+                    // Remove from active drones array
+                    const index = activeDrones.indexOf(drone);
+                    if (index > -1) {
+                        activeDrones.splice(index, 1);
+                    }
+                }, 2100);
+            } catch (e) {
+                console.log('Error removing drone:', e);
+            }
+        }
+
+        /**
+         * Evolve all active drones over time
+         * Slowly modulate frequency and filter for ambient texture
+         */
+        function evolveDrones() {
+            const now = Date.now();
+            
+            activeDrones.forEach(drone => {
+                const age = (now - drone.startTime) / 1000; // seconds
+                
+                // Slowly drift frequency (like analog drift)
+                const drift = Math.sin(age * 0.3) * 10; // ±10 Hz drift
+                drone.osc.frequency.value = drone.baseFreq + drift;
+
+                // Evolve filter cutoff
+                const filterLFO = Math.sin(age * 0.5) * 600 + 800; // 200-1400 Hz
+                drone.filter.frequency.value = filterLFO;
+            });
+        }
+
+        /**
+         * Stop all drones (cleanup)
+         */
+        function stopAllDrones() {
+            activeDrones.forEach(drone => {
+                try {
+                    if (drone.osc) drone.osc.stop();
+                    if (drone.osc) drone.osc.disconnect();
+                    if (drone.filter) drone.filter.disconnect();
+                    if (drone.gain) drone.gain.disconnect();
+                } catch (e) {
+                    // Already stopped
+                }
+            });
+            activeDrones = [];
+        }
+
         canvas.addEventListener('mousemove', (e) => {
             const rect = canvas.getBoundingClientRect();
             mouseX = e.clientX / rect.width;
@@ -1703,6 +2257,57 @@
                 createSplashSound(clickX, clickY);
             }
         }, { passive: false });
+
+        // ===== MOUSE DOWN/UP FOR SUSTAINED INTERACTIONS =====
+        let isMouseDown = false;
+        
+        canvas.addEventListener('mousedown', (e) => {
+            isMouseDown = true;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX / rect.width;
+            const y = 1.0 - e.clientY / rect.height;
+
+            // Pattern Sequencer: Mark this position as a trigger zone
+            if (oramicsEffects.patternSequencer.active) {
+                sequencerZones.push({
+                    x: x,
+                    y: y,
+                    color: currentColor,
+                    lastTriggerTime: 0 // Never triggered yet
+                });
+                console.log('⊞ Sequencer zone added at', x.toFixed(2), y.toFixed(2), currentColor);
+            }
+
+            // Gesture Drones: Start tracking for sustained gesture
+            if (oramicsEffects.gestureDrones.active) {
+                droneStartTime = Date.now();
+                
+                // Check periodically if gesture is sustained long enough
+                const checkDroneActivation = setInterval(() => {
+                    if (!isMouseDown) {
+                        clearInterval(checkDroneActivation);
+                        return;
+                    }
+
+                    const sustainedTime = Date.now() - droneStartTime;
+                    if (sustainedTime >= DRONE_ACTIVATION_TIME) {
+                        // Create drone!
+                        createDrone(currentColor, { x, y });
+                        clearInterval(checkDroneActivation);
+                    }
+                }, 100); // Check every 100ms
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            isMouseDown = false;
+            droneStartTime = 0; // Reset drone timer
+        });
+
+        canvas.addEventListener('mouseleave', (e) => {
+            isMouseDown = false;
+            droneStartTime = 0; // Reset if mouse leaves canvas
+        });
 
         function bindFramebuffer(target) {
             gl.bindFramebuffer(gl.FRAMEBUFFER, target.fbo);
@@ -1854,8 +2459,48 @@
             
             const baseFreq = quantizePitch(y) * sound.baseFreqMultiplier;
             const visualFadeTime = 5.0 * voice.persistence;
-            const soundRelease = visualFadeTime * 0.8;
-            const duration = sound.attack + soundRelease;
+            let soundRelease = visualFadeTime * 0.8;
+            let attackTime = sound.attack;
+            
+            // ===== PAINTED ENVELOPE (ORAMICS) =====
+            /*
+             * When Painted Envelope is active, gesture shape controls sound evolution
+             * Inspired by Daphne Oram's Oramics technique
+             * 
+             * GESTURE METRICS:
+             * - gestureAvgVelocity: How fast you're painting (0-1+)
+             * - gesturePathLength: How long the stroke is (0-1+)
+             * - gestureDuration: How long you've been painting (ms)
+             * 
+             * SOUND PARAMETERS:
+             * - Fast stroke = quick attack, short release (percussive)
+             * - Slow stroke = slow attack, long release (pad-like)
+             * - Short stroke = tight, punchy sound
+             * - Long stroke = sustained, evolving sound
+             */
+            if (oramicsEffects.paintedEnvelope.active && isGestureActive) {
+                const gestureDuration = (Date.now() - gestureStartTime) / 1000; // in seconds
+                
+                // Map velocity to envelope speed - MORE DRAMATIC RANGE
+                // Fast velocity (>0.5) = INSTANT attack (0.001s), VERY SHORT release (0.1s) - SUPER PERCUSSIVE
+                // Slow velocity (<0.1) = VERY SLOW attack (1.0s), VERY LONG release (5.0s) - AMBIENT PAD
+                const velocityNorm = Math.min(gestureAvgVelocity / 0.5, 1.0);
+                attackTime = 0.001 + (1.0 - velocityNorm) * 1.0; // 0.001s to 1.0s (2x range!)
+                soundRelease = 0.1 + (1.0 - velocityNorm) * 4.9; // 0.1s to 5.0s (much longer!)
+                
+                // Path length affects sustain MORE DRAMATICALLY
+                // Short stroke = quick fade
+                // Long stroke = very sustained sound
+                const pathLengthBoost = Math.min(gesturePathLength / 0.3, 3.0); // Up to 3x boost
+                soundRelease *= pathLengthBoost;
+                
+                // Duration affects overall envelope curve MORE
+                // Longer gestures = much more sustained sounds
+                const durationBoost = Math.min(gestureDuration / 1.5, 2.5); // Up to 2.5x boost
+                soundRelease *= durationBoost;
+            }
+            
+            const duration = attackTime + soundRelease;
             
             const safeIntensity = Math.max(0, Math.min(colorIntensity || 0, 1.0));
             const baseVolume = 0.04 * Math.min(safeIntensity * 3, 1.0);
@@ -1867,6 +2512,36 @@
             const osc = audioContext.createOscillator();
             osc.type = sound.waveform;
             osc.frequency.value = baseFreq;
+            
+            // ===== DRAWN WAVEFORMS (ORAMICS) =====
+            /*
+             * When Drawn Waveforms is active, use the visual pattern to create
+             * a custom waveform that replaces the basic oscillator
+             * This is the literal Oramics technique!
+             */
+            if (oramicsEffects.drawnWaveforms.active && visualWaveformBuffer) {
+                try {
+                    // Use visual data as Fourier coefficients
+                    // More visual data = richer harmonic content
+                    const harmonicCount = Math.min(32, visualWaveformBuffer.length);
+                    const real = new Float32Array(harmonicCount);
+                    const imag = new Float32Array(harmonicCount);
+                    
+                    // Map visual brightness to harmonic amplitudes
+                    for (let i = 0; i < harmonicCount; i++) {
+                        const visualValue = visualWaveformBuffer[Math.floor((i / harmonicCount) * visualWaveformBuffer.length)];
+                        // Emphasize the effect by amplifying the visual influence
+                        real[i] = visualValue * 0.5; // Cosine component
+                        imag[i] = visualValue * 0.5; // Sine component
+                    }
+                    
+                    const periodicWave = audioContext.createPeriodicWave(real, imag);
+                    osc.setPeriodicWave(periodicWave);
+                    console.log('✓ Visual waveform applied to oscillator');
+                } catch (e) {
+                    console.log('✗ Could not set visual waveform:', e);
+                }
+            }
             
             if (sound.detune) {
                 osc.detune.value = (Math.random() - 0.5) * sound.detune;
@@ -2205,7 +2880,7 @@
             
             const env = audioContext.createGain();
             env.gain.value = 0;
-            env.gain.linearRampToValueAtTime(baseVolume, now + sound.attack);
+            env.gain.linearRampToValueAtTime(baseVolume, now + attackTime);
             env.gain.exponentialRampToValueAtTime(0.001, now + duration);
             
             let noiseNode = null;
@@ -2985,6 +3660,12 @@
                 stopBeat(key);
             });
             
+            // Stop all Oramics drones
+            stopAllDrones();
+            
+            // Clear sequencer zones
+            sequencerZones = [];
+            
             // Close audio context if it exists
             if (audioContext && audioContext.state !== 'closed') {
                 try {
@@ -3020,6 +3701,7 @@
             initColorPalette();
             initGlitchPanel();
             initBeatPanel();
+            initOramicsPanel();
             
             const toggleBtn = document.getElementById('toggleAudio');
             const audioPanel = document.getElementById('audioPanel');
@@ -3059,6 +3741,15 @@
                             }
                         });
                         
+                        // Deactivate all Oramics effects when audio is off
+                        Object.keys(oramicsEffects).forEach(key => {
+                            if (oramicsEffects[key].active) {
+                                oramicsEffects[key].active = false;
+                                const btn = document.querySelector(`[data-oramics="${key}"]`);
+                                if (btn) btn.classList.remove('active');
+                            }
+                        });
+                        
                         selectedColorIndex = -1;
                         document.querySelectorAll('.color-swatch').forEach(swatch => {
                             swatch.classList.remove('selected');
@@ -3081,6 +3772,60 @@
             
             mouseVelX = deltaX;
             mouseVelY = deltaY;
+            
+            // ===== ORAMICS GESTURE TRACKING =====
+            // Track gesture metrics when painted envelope is active and painting is happening
+            if (oramicsEffects.paintedEnvelope.active && selectedColorIndex >= 0) {
+                const isMoving = Math.abs(deltaX) > 0.01 || Math.abs(deltaY) > 0.01;
+                
+                if (isMoving) {
+                    if (!isGestureActive) {
+                        // Start of new gesture
+                        isGestureActive = true;
+                        gestureStartTime = Date.now();
+                        gesturePathLength = 0;
+                        gestureAvgVelocity = 0;
+                        lastGesturePos = { x: mouseX, y: mouseY };
+                    } else {
+                        // Continue gesture - accumulate path length
+                        const distance = Math.sqrt(
+                            Math.pow(mouseX - lastGesturePos.x, 2) + 
+                            Math.pow(mouseY - lastGesturePos.y, 2)
+                        );
+                        gesturePathLength += distance;
+                        lastGesturePos = { x: mouseX, y: mouseY };
+                        
+                        // Calculate average velocity
+                        const currentVelocity = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                        gestureAvgVelocity = (gestureAvgVelocity * 0.9) + (currentVelocity * 0.1);
+                    }
+                } else {
+                    // End of gesture
+                    isGestureActive = false;
+                }
+            } else {
+                isGestureActive = false;
+            }
+            
+            // ===== DRAWN WAVEFORMS UPDATE =====
+            /*
+             * Periodically sample the visual field and convert to audio waveform
+             * Like Oram's photoelectric reader scanning the film strip
+             */
+            if (oramicsEffects.drawnWaveforms.active && audioEnabled) {
+                const now = Date.now();
+                if (now - lastWaveformUpdateTime > WAVEFORM_UPDATE_RATE) {
+                    const waveformData = sampleVisualWaveform();
+                    if (waveformData) {
+                        visualWaveformBuffer = waveformData;
+                        lastWaveformUpdateTime = now;
+                        
+                        // Calculate average brightness for debugging
+                        const avgBrightness = waveformData.reduce((sum, val) => sum + Math.abs(val), 0) / waveformData.length;
+                        console.log(`Waveform updated - Avg brightness: ${avgBrightness.toFixed(3)}`);
+                    }
+                }
+            }
             
             if (pendingClicks.length > 0) {
                 pendingClicks.forEach(click => {
@@ -3338,6 +4083,49 @@
             gl.activeTexture(gl.TEXTURE1);
             gl.bindTexture(gl.TEXTURE_2D, colorBuffer.read.texture);
             gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            
+            // ===== ORAMICS EFFECTS PROCESSING =====
+            
+            // Pattern Sequencer: Check if fluid flows through painted zones
+            if (oramicsEffects.patternSequencer.active && sequencerZones.length > 0) {
+                const now = Date.now();
+                
+                // Read velocity data to detect fluid flow
+                try {
+                    const pixels = new Uint8Array(simWidth * simHeight * 4);
+                    gl.bindFramebuffer(gl.FRAMEBUFFER, velocity.read.fbo);
+                    gl.readPixels(0, 0, simWidth, simHeight, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                    
+                    sequencerZones.forEach(zone => {
+                        // Check if enough time has passed since last trigger (cooldown)
+                        if (now - zone.lastTriggerTime < ZONE_TRIGGER_COOLDOWN) return;
+                        
+                        // Sample velocity at zone position
+                        const zoneX = Math.floor(zone.x * simWidth);
+                        const zoneY = Math.floor(zone.y * simHeight);
+                        const pixelIndex = (zoneY * simWidth + zoneX) * 4;
+                        
+                        // Get velocity magnitude (stored in R and G channels)
+                        const vx = (pixels[pixelIndex] / 255.0) - 0.5;
+                        const vy = (pixels[pixelIndex + 1] / 255.0) - 0.5;
+                        const velocityMagnitude = Math.sqrt(vx * vx + vy * vy);
+                        
+                        // If fluid is flowing through this zone, trigger a note!
+                        if (velocityMagnitude > 0.05) { // Threshold for "flow"
+                            triggerColorVoice(zone.color, zone.x, zone.y, 0.15);
+                            zone.lastTriggerTime = now;
+                            console.log('⊞ Sequencer triggered:', zone.color);
+                        }
+                    });
+                } catch (e) {
+                    // Silently fail if can't read pixels
+                }
+            }
+            
+            // Gesture Drones: Evolve all active drones
+            if (oramicsEffects.gestureDrones.active && activeDrones.length > 0) {
+                evolveDrones();
+            }
             
             requestAnimationFrame(render);
         }
