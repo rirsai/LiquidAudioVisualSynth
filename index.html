@@ -681,6 +681,36 @@
                 name: 'Gesture Drones',
                 icon: '〰', // Wave/drone icon
                 description: 'Sustained painting creates evolving ambient layers'
+            },
+            textureMode: {
+                active: false,
+                name: 'Texture Mode',
+                icon: '▦', // Texture/pattern icon
+                description: 'Non-pitched textures: noise, percussion, granular, industrial'
+            },
+            textureMode2: {
+                active: false,
+                name: 'Texture Mode 2',
+                icon: '▧', // Alternate texture icon
+                description: 'Electronic textures: FM bells, ring mod, bit-crush, vocoder'
+            },
+            arpeggiator: {
+                active: false,
+                name: 'Arpeggiator',
+                icon: '⟨⟩', // Sequence icon
+                description: 'Sequenced note patterns that evolve with your painting'
+            },
+            stutter: {
+                active: false,
+                name: 'Stutter',
+                icon: '⧈', // Glitch/repeat icon
+                description: 'Glitchy repetitions and rhythmic freezes'
+            },
+            polyrhythm: {
+                active: false,
+                name: 'Polyrhythm',
+                icon: '◈', // Multiple rhythm icon
+                description: 'Multiple overlapping rhythm layers'
             }
         };
 
@@ -843,6 +873,18 @@
         }
         
         function toggleOramics(key, btn) {
+            // If activating a texture mode, deactivate the other texture modes
+            if ((key === 'textureMode' || key === 'textureMode2') && !oramicsEffects[key].active) {
+                // Turn off other texture modes
+                if (key === 'textureMode' && oramicsEffects.textureMode2.active) {
+                    oramicsEffects.textureMode2.active = false;
+                    document.querySelector(`[data-oramics="textureMode2"]`).classList.remove('active');
+                } else if (key === 'textureMode2' && oramicsEffects.textureMode.active) {
+                    oramicsEffects.textureMode.active = false;
+                    document.querySelector(`[data-oramics="textureMode"]`).classList.remove('active');
+                }
+            }
+            
             oramicsEffects[key].active = !oramicsEffects[key].active;
             btn.classList.toggle('active', oramicsEffects[key].active);
         }
@@ -2047,6 +2089,24 @@
         let droneStartTime = 0;
         const DRONE_ACTIVATION_TIME = 800; // ms of sustained painting to start drone
 
+        // ===== RHYTHMIC PATTERN EFFECTS =====
+        /*
+         * Arpeggiator, Stutter, and Polyrhythm effects
+         * These modify how sounds are triggered
+         */
+        // Arpeggiator state
+        let arpNoteIndex = 0;
+        const arpPattern = [0, 4, 7, 12]; // Major triad + octave (semitones)
+        
+        // Stutter state
+        let stutterBuffer = []; // Recent sound events
+        let lastStutterTime = 0;
+        const STUTTER_INTERVAL = 150; // ms between stutters
+        
+        // Polyrhythm state
+        let polyrhythmTimers = [];
+        const POLYRHYTHM_DIVISIONS = [3, 5, 7]; // Triplets, quintuplets, septuplets
+
         // ===== DRAWN WAVEFORMS (ORAMICS) =====
         /*
          * Read visual pattern from screen and convert to audio waveform
@@ -2470,13 +2530,670 @@
             return quantizedFreq;
         }
 
+        // ===== TEXTURE MODE SOUND GENERATORS =====
+        /*
+         * Non-pitched texture sounds inspired by Oramics
+         * Create varied sonic textures beyond musical pitches
+         */
+        
+        /**
+         * Generate noise sweep sounds (wind, ocean, static)
+         * Filtered noise with sweeping frequency
+         */
+        function generateNoiseSweep(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.5 + (1.0 - currentPaintingVelocity) * 2.0; // 0.5s to 2.5s
+            
+            // Create noise
+            const bufferSize = audioContext.sampleRate * duration;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            
+            // Generate noise with varying character based on position
+            const noiseType = y; // 0.0-1.0 determines noise color
+            for (let i = 0; i < bufferSize; i++) {
+                // Mix white and pink noise based on Y position
+                data[i] = (Math.random() * 2 - 1) * (0.3 + noiseType * 0.7);
+            }
+            
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            // Sweeping filter
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'bandpass';
+            const startFreq = 200 + y * 3000; // Y position determines sweep range
+            const endFreq = startFreq + (x - 0.5) * 2000; // X position determines sweep direction
+            filter.frequency.value = startFreq;
+            filter.frequency.linearRampToValueAtTime(endFreq, now + duration);
+            filter.Q.value = 2 + gestureCurvature * 8; // Curvature affects resonance
+            
+            const env = audioContext.createGain();
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+            const volume = 0.05 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.08 to 0.05
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(volume, now + 0.02);
+            env.gain.linearRampToValueAtTime(volume * 0.7, now + duration * 0.3);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6));
+            
+            noise.connect(filter);
+            filter.connect(env);
+            env.connect(panner);
+            panner.connect(masterGain);
+            panner.connect(convolver);
+            
+            noise.start(now);
+            noise.stop(now + duration);
+            
+            console.log('💨 Noise sweep:', startFreq.toFixed(0), '→', endFreq.toFixed(0), 'Hz');
+        }
+        
+        /**
+         * Generate percussive hit sounds (clicks, thuds, snaps)
+         * Short, sharp transient sounds
+         */
+        function generatePercussiveHit(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            
+            // Y position determines hit type
+            const hitType = y;
+            let duration, freq, noiseAmount, attack, decay;
+            
+            if (hitType > 0.66) {
+                // High click/snap
+                duration = 0.02 + gestureCurvature * 0.03;
+                freq = 2000 + x * 3000;
+                noiseAmount = 0.7;
+                attack = 0.001;
+                decay = 0.015;
+            } else if (hitType > 0.33) {
+                // Mid thud
+                duration = 0.08 + gestureCurvature * 0.05;
+                freq = 150 + x * 300;
+                noiseAmount = 0.4;
+                attack = 0.002;
+                decay = 0.06;
+            } else {
+                // Low thump
+                duration = 0.15 + gestureCurvature * 0.1;
+                freq = 40 + x * 100;
+                noiseAmount = 0.2;
+                attack = 0.003;
+                decay = 0.12;
+            }
+            
+            // Tonal component
+            const osc = audioContext.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + duration);
+            
+            // Noise component
+            const bufferSize = audioContext.sampleRate * duration;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * noiseAmount;
+            }
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            const noiseFilter = audioContext.createBiquadFilter();
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.value = freq * 2;
+            noiseFilter.Q.value = 5;
+            
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+            const volume = 0.09 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.15 to 0.09
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(volume, now + attack);
+            env.gain.exponentialRampToValueAtTime(0.001, now + decay);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6));
+            
+            osc.connect(env);
+            noise.connect(noiseFilter);
+            noiseFilter.connect(env);
+            env.connect(panner);
+            panner.connect(masterGain);
+            
+            osc.start(now);
+            noise.start(now);
+            osc.stop(now + duration);
+            noise.stop(now + duration);
+            
+            console.log('🥁 Percussive hit:', hitType > 0.66 ? 'click' : hitType > 0.33 ? 'thud' : 'thump');
+        }
+        
+        /**
+         * Generate granular textures (sand, rain, crackling)
+         * Many tiny sound grains creating texture
+         */
+        function generateGranularTexture(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.3 + (1.0 - currentPaintingVelocity) * 1.0;
+            
+            // Number of grains based on velocity and curvature
+            const grainCount = Math.floor(15 + currentPaintingVelocity * 35 + gestureCurvature * 20);
+            const grainDuration = 0.01 + y * 0.04; // Y position affects grain length
+            
+            for (let i = 0; i < grainCount; i++) {
+                const grainDelay = (i / grainCount) * duration * 0.9;
+                const grainFreq = 200 + Math.random() * 2000 + x * 1000; // X position affects pitch range
+                
+                const grainOsc = audioContext.createOscillator();
+                grainOsc.type = Math.random() > 0.5 ? 'sine' : 'triangle';
+                grainOsc.frequency.value = grainFreq;
+                
+                const grainFilter = audioContext.createBiquadFilter();
+                grainFilter.type = 'bandpass';
+                grainFilter.frequency.value = grainFreq * (1 + Math.random() * 0.5);
+                grainFilter.Q.value = 2 + Math.random() * 4;
+                
+                const grainEnv = audioContext.createGain();
+                const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+                const grainVol = 0.012 * intensity * (0.6 + velocityBoost * 0.4) * (0.3 + Math.random() * 0.7); // Reduced from 0.02 to 0.012
+                
+                grainEnv.gain.value = 0;
+                grainEnv.gain.setValueAtTime(0, now + grainDelay);
+                grainEnv.gain.linearRampToValueAtTime(grainVol, now + grainDelay + 0.002);
+                grainEnv.gain.exponentialRampToValueAtTime(0.001, now + grainDelay + grainDuration);
+                
+                const panner = audioContext.createStereoPanner();
+                const panOffset = (Math.random() - 0.5) * 0.4;
+                panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6 + panOffset));
+                
+                grainOsc.connect(grainFilter);
+                grainFilter.connect(grainEnv);
+                grainEnv.connect(panner);
+                panner.connect(masterGain);
+                panner.connect(convolver);
+                
+                grainOsc.start(now + grainDelay);
+                grainOsc.stop(now + grainDelay + grainDuration);
+            }
+            
+            console.log('✨ Granular texture:', grainCount, 'grains');
+        }
+        
+        /**
+         * Generate industrial sounds (metal scrapes, machinery)
+         * Complex modulated noise with metallic character
+         */
+        function generateIndustrialSound(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.4 + (1.0 - currentPaintingVelocity) * 1.5;
+            
+            // Multiple noise sources for complexity
+            const numLayers = 3;
+            
+            for (let layer = 0; layer < numLayers; layer++) {
+                // Create noise buffer
+                const bufferSize = audioContext.sampleRate * duration;
+                const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+                const data = noiseBuffer.getChannelData(0);
+                
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = (Math.random() * 2 - 1);
+                }
+                
+                const noise = audioContext.createBufferSource();
+                noise.buffer = noiseBuffer;
+                
+                // Metallic resonant filter
+                const filter = audioContext.createBiquadFilter();
+                filter.type = 'bandpass';
+                const baseFreq = 100 + layer * 400 + y * 800; // Y position affects frequency range
+                const endFreq = baseFreq + (x - 0.5) * 600 + Math.sin(layer * 2) * 200; // X affects modulation
+                filter.frequency.value = baseFreq;
+                filter.frequency.linearRampToValueAtTime(endFreq, now + duration * 0.6);
+                filter.frequency.linearRampToValueAtTime(baseFreq * 0.8, now + duration);
+                filter.Q.value = 8 + gestureCurvature * 12; // High resonance for metallic sound
+                
+                // Distortion for harshness
+                const distortion = audioContext.createWaveShaper();
+                const curve = new Float32Array(256);
+                const amount = 2 + intensity * 3;
+                for (let i = 0; i < 256; i++) {
+                    const x = (i / 128) - 1;
+                    curve[i] = Math.tanh(x * amount);
+                }
+                distortion.curve = curve;
+                
+                const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+                const volume = (0.025 + layer * 0.012) * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.04/0.02 to 0.025/0.012
+                
+                const env = audioContext.createGain();
+                env.gain.value = 0;
+                env.gain.linearRampToValueAtTime(volume, now + 0.01 + layer * 0.02);
+                env.gain.linearRampToValueAtTime(volume * 0.5, now + duration * 0.4);
+                env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+                
+                const panner = audioContext.createStereoPanner();
+                const panOffset = (layer - 1) * 0.3; // Spread layers across stereo field
+                panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6 + panOffset));
+                
+                noise.connect(filter);
+                filter.connect(distortion);
+                distortion.connect(env);
+                env.connect(panner);
+                panner.connect(masterGain);
+                
+                noise.start(now);
+                noise.stop(now + duration);
+            }
+            
+            console.log('🏭 Industrial sound:', y.toFixed(2), 'position');
+        }
+        
+        /**
+         * Main texture dispatcher - routes to appropriate texture generator
+         */
+        function triggerTextureSound(x, y, intensity) {
+            if (!audioContext) return;
+            
+            // Y position determines texture type (0.0 = bottom, 1.0 = top)
+            if (y >= 0.75) {
+                // Top 25%: Noise sweeps
+                generateNoiseSweep(x, y, intensity);
+            } else if (y >= 0.5) {
+                // Upper-middle 25%: Percussive hits
+                generatePercussiveHit(x, y, intensity);
+            } else if (y >= 0.25) {
+                // Lower-middle 25%: Granular textures
+                generateGranularTexture(x, y, intensity);
+            } else {
+                // Bottom 25%: Industrial sounds
+                generateIndustrialSound(x, y, intensity);
+            }
+        }
+        
+        // ===== TEXTURE MODE 2 SOUND GENERATORS (ELECTRONIC/SYNTHETIC) =====
+        /*
+         * Electronic and synthetic textures inspired by early electronic music
+         * FM synthesis, ring modulation, bit-crushing, vocoder-like effects
+         */
+        
+        /**
+         * Generate FM Bell sounds (Frequency Modulation)
+         * Metallic, bell-like tones with complex harmonics
+         */
+        function generateFMBell(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.8 + (1.0 - currentPaintingVelocity) * 2.0;
+            
+            // Carrier frequency (base pitch)
+            const carrierFreq = 200 + y * 1500 + x * 500;
+            
+            // Modulator frequency (creates the metallic timbre)
+            const modRatio = 2.1 + gestureCurvature * 3; // Curvature affects inharmonicity
+            const modFreq = carrierFreq * modRatio;
+            
+            // Create carrier and modulator
+            const carrier = audioContext.createOscillator();
+            carrier.frequency.value = carrierFreq;
+            
+            const modulator = audioContext.createOscillator();
+            modulator.frequency.value = modFreq;
+            
+            // Modulation depth (how much the modulator affects carrier)
+            const modDepth = audioContext.createGain();
+            const depthAmount = 100 + x * 400; // X position affects brightness
+            modDepth.gain.value = depthAmount;
+            modDepth.gain.exponentialRampToValueAtTime(1, now + duration); // Decay over time
+            
+            // Connect modulator to carrier frequency
+            modulator.connect(modDepth);
+            modDepth.connect(carrier.frequency);
+            
+            // Bell envelope - quick attack, slow decay
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+            const volume = 0.07 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.12 to 0.07
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(volume, now + 0.005);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6));
+            
+            carrier.connect(env);
+            env.connect(panner);
+            panner.connect(masterGain);
+            panner.connect(convolver);
+            
+            carrier.start(now);
+            modulator.start(now);
+            carrier.stop(now + duration);
+            modulator.stop(now + duration);
+            
+            console.log('🔔 FM Bell:', carrierFreq.toFixed(0), 'Hz, ratio:', modRatio.toFixed(2));
+        }
+        
+        /**
+         * Generate Ring Modulation sounds
+         * Alien, robotic, inharmonic tones
+         */
+        function generateRingMod(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.4 + (1.0 - currentPaintingVelocity) * 1.0;
+            
+            // Two oscillators for ring modulation
+            const osc1Freq = 150 + y * 600;
+            const osc2Freq = 200 + x * 800;
+            
+            const osc1 = audioContext.createOscillator();
+            osc1.type = 'sine';
+            osc1.frequency.value = osc1Freq;
+            
+            const osc2 = audioContext.createOscillator();
+            osc2.type = 'sine';
+            osc2.frequency.value = osc2Freq;
+            
+            // Ring mod = multiply two signals (using gain as multiplier)
+            const ringMod = audioContext.createGain();
+            ringMod.gain.value = 0; // Starts at 0
+            
+            // Osc2 modulates the gain (ring modulation effect)
+            osc2.connect(ringMod.gain);
+            
+            // Osc1 goes through the modulated gain
+            osc1.connect(ringMod);
+            
+            // Add some filtering for character
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 400 + y * 1000;
+            filter.Q.value = 2 + gestureCurvature * 6;
+            
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+            const volume = 0.09 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.15 to 0.09
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(volume, now + 0.01);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6));
+            
+            ringMod.connect(filter);
+            filter.connect(env);
+            env.connect(panner);
+            panner.connect(masterGain);
+            
+            osc1.start(now);
+            osc2.start(now);
+            osc1.stop(now + duration);
+            osc2.stop(now + duration);
+            
+            console.log('👽 Ring Mod:', osc1Freq.toFixed(0), '×', osc2Freq.toFixed(0), 'Hz');
+        }
+        
+        /**
+         * Generate Bit-Crushed Digital sounds
+         * 8-bit video game glitches and artifacts
+         */
+        function generateBitCrush(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.3 + (1.0 - currentPaintingVelocity) * 0.8;
+            
+            // Base oscillator
+            const freq = 100 + y * 800 + Math.random() * 200;
+            const osc = audioContext.createOscillator();
+            osc.type = 'square'; // Square wave for digital character
+            osc.frequency.value = freq;
+            
+            // Bit crushing via waveshaper
+            const bitCrusher = audioContext.createWaveShaper();
+            const bits = Math.floor(2 + (1 - y) * 6); // Y position = bit depth (2-8 bits)
+            const steps = Math.pow(2, bits);
+            const curve = new Float32Array(512);
+            
+            for (let i = 0; i < 512; i++) {
+                const x = (i / 256) - 1;
+                const crushed = Math.round(x * steps) / steps;
+                curve[i] = crushed;
+            }
+            bitCrusher.curve = curve;
+            
+            // Sample rate reduction effect (via rapid modulation)
+            const sampleRateHz = 4000 + x * 12000; // X position affects sample rate
+            const tremolo = audioContext.createOscillator();
+            tremolo.frequency.value = sampleRateHz;
+            tremolo.type = 'square';
+            
+            const tremoloGain = audioContext.createGain();
+            tremoloGain.gain.value = 0.5;
+            
+            tremolo.connect(tremoloGain);
+            
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+            const volume = 0.06 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.1 to 0.06
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(volume, now + 0.005);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6));
+            
+            osc.connect(bitCrusher);
+            bitCrusher.connect(env);
+            env.connect(panner);
+            panner.connect(masterGain);
+            
+            osc.start(now);
+            tremolo.start(now);
+            osc.stop(now + duration);
+            tremolo.stop(now + duration);
+            
+            console.log('🎮 Bit-Crush:', bits, 'bits @', sampleRateHz.toFixed(0), 'Hz');
+        }
+        
+        /**
+         * Generate Vocoder-like sounds
+         * Synthetic speech-like textures
+         */
+        function generateVocoder(x, y, intensity) {
+            if (!audioContext) return;
+            
+            const now = audioContext.currentTime;
+            const duration = 0.5 + (1.0 - currentPaintingVelocity) * 1.5;
+            
+            // Noise source (like vocal excitation)
+            const bufferSize = audioContext.sampleRate * duration;
+            const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = Math.random() * 2 - 1;
+            }
+            
+            const noise = audioContext.createBufferSource();
+            noise.buffer = noiseBuffer;
+            
+            // Multiple formant filters (vocal-like resonances)
+            const numFormants = 3;
+            const formantFilters = [];
+            
+            for (let i = 0; i < numFormants; i++) {
+                const filter = audioContext.createBiquadFilter();
+                filter.type = 'bandpass';
+                
+                // Formant frequencies based on Y position
+                const formantBase = [300, 1000, 2500]; // Typical vocal formants
+                const formantFreq = formantBase[i] + y * 500 + x * 300;
+                filter.frequency.value = formantFreq;
+                filter.Q.value = 8 + gestureCurvature * 8; // High Q for vocal quality
+                
+                formantFilters.push(filter);
+            }
+            
+            // Create parallel routing for formants
+            const merger = audioContext.createChannelMerger(numFormants);
+            const splitter = audioContext.createChannelSplitter(numFormants);
+            
+            formantFilters.forEach((filter, i) => {
+                noise.connect(filter);
+                filter.connect(merger, 0, i);
+            });
+            
+            const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
+            const volume = 0.05 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.08 to 0.05
+            
+            const env = audioContext.createGain();
+            env.gain.value = 0;
+            env.gain.linearRampToValueAtTime(volume, now + 0.02);
+            env.gain.linearRampToValueAtTime(volume * 0.7, now + duration * 0.5);
+            env.gain.exponentialRampToValueAtTime(0.001, now + duration);
+            
+            const panner = audioContext.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, (x - 0.5) * 2.6));
+            
+            merger.connect(env);
+            env.connect(panner);
+            panner.connect(masterGain);
+            panner.connect(convolver);
+            
+            noise.start(now);
+            noise.stop(now + duration);
+            
+            console.log('🗣️ Vocoder:', numFormants, 'formants');
+        }
+        
+        /**
+         * Main texture 2 dispatcher - routes to appropriate electronic texture generator
+         */
+        function triggerTextureSound2(x, y, intensity) {
+            if (!audioContext) return;
+            
+            // Y position determines texture type (0.0 = bottom, 1.0 = top)
+            if (y >= 0.75) {
+                // Top 25%: FM Bells
+                generateFMBell(x, y, intensity);
+            } else if (y >= 0.5) {
+                // Upper-middle 25%: Ring Modulation
+                generateRingMod(x, y, intensity);
+            } else if (y >= 0.25) {
+                // Lower-middle 25%: Bit-Crushed Digital
+                generateBitCrush(x, y, intensity);
+            } else {
+                // Bottom 25%: Vocoder-like
+                generateVocoder(x, y, intensity);
+            }
+        }
+
+        // ===== RHYTHMIC PATTERN EFFECT PROCESSORS =====
+        
+        /**
+         * Apply arpeggiator to pitched sounds (musical mode only)
+         * Cycles through a note pattern, transposing each trigger
+         */
+        function applyArpeggiator(freq) {
+            if (!oramicsEffects.arpeggiator.active) return freq;
+            
+            // Calculate semitone offset from pattern
+            const semitoneOffset = arpPattern[arpNoteIndex % arpPattern.length];
+            
+            // Advance to next note in pattern
+            arpNoteIndex++;
+            
+            // Apply transposition (multiply by 2^(semitones/12))
+            const transposedFreq = freq * Math.pow(2, semitoneOffset / 12);
+            
+            console.log('⟨⟩ Arp:', arpNoteIndex % arpPattern.length, '+', semitoneOffset, 'semitones');
+            
+            return transposedFreq;
+        }
+        
+        /**
+         * Stutter effect - stores and replays recent sounds
+         */
+        function processStutter(x, y, intensity, triggerFunc) {
+            if (!oramicsEffects.stutter.active) return;
+            
+            const now = Date.now();
+            
+            // Store this sound event
+            stutterBuffer.push({ x, y, intensity, time: now });
+            
+            // Keep only last 5 events
+            if (stutterBuffer.length > 5) {
+                stutterBuffer.shift();
+            }
+            
+            // Replay stutters at intervals
+            if (now - lastStutterTime > STUTTER_INTERVAL && stutterBuffer.length > 0) {
+                // Pick a random recent sound to repeat
+                const randomEvent = stutterBuffer[Math.floor(Math.random() * stutterBuffer.length)];
+                
+                // Retrigger it with slight variation
+                const varX = randomEvent.x + (Math.random() - 0.5) * 0.05;
+                const varY = randomEvent.y + (Math.random() - 0.5) * 0.05;
+                
+                triggerFunc(varX, varY, randomEvent.intensity * 0.7); // Quieter repeat
+                
+                lastStutterTime = now;
+                console.log('⧈ Stutter repeat');
+            }
+        }
+        
+        /**
+         * Polyrhythm effect - adds additional rhythm layers
+         * Triggers extra notes at odd divisions
+         */
+        function processPolyrhythm(x, y, intensity, triggerFunc) {
+            if (!oramicsEffects.polyrhythm.active) return;
+            
+            // Schedule polyrhythmic echoes at different subdivisions
+            POLYRHYTHM_DIVISIONS.forEach((division, index) => {
+                const delay = (musicalClock.bpm / 60) * 1000 / division; // ms per division
+                
+                setTimeout(() => {
+                    // Slight spatial offset for each layer
+                    const offsetX = x + (index - 1) * 0.1;
+                    const offsetY = y + (Math.random() - 0.5) * 0.05;
+                    
+                    triggerFunc(offsetX, offsetY, intensity * 0.5); // Quieter echoes
+                }, delay * (index + 1));
+            });
+            
+            console.log('◈ Polyrhythm layers added');
+        }
+
         // COLOR VOICE AUDIO TRIGGER
         function triggerColorVoice(voiceIndex, x, y, colorIntensity) {
             const voice = colorVoices[voiceIndex];
             const sound = voice.sound;
             const now = audioContext.currentTime;
             
-            const baseFreq = quantizePitch(y) * sound.baseFreqMultiplier;
+            let baseFreq = quantizePitch(y) * sound.baseFreqMultiplier;
+            
+            // Apply arpeggiator if active
+            baseFreq = applyArpeggiator(baseFreq);
             const visualFadeTime = 5.0 * voice.persistence;
             let soundRelease = visualFadeTime * 0.8;
             let attackTime = sound.attack;
@@ -4048,7 +4765,23 @@
                     lastColorIntensity = lastColorIntensity * 0.99 + injectionStrength;
                     
                     if (audioEnabled && Date.now() - lastSoundTime > 80) {
-                        triggerColorVoice(selectedColorIndex, mouseX, mouseY, lastColorIntensity);
+                        // Determine which trigger function to use
+                        let triggerFunc;
+                        if (oramicsEffects.textureMode2.active) {
+                            triggerFunc = (x, y, intensity) => triggerTextureSound2(x, y, intensity);
+                        } else if (oramicsEffects.textureMode.active) {
+                            triggerFunc = (x, y, intensity) => triggerTextureSound(x, y, intensity);
+                        } else {
+                            triggerFunc = (x, y, intensity) => triggerColorVoice(selectedColorIndex, x, y, intensity);
+                        }
+                        
+                        // Trigger main sound
+                        triggerFunc(mouseX, mouseY, lastColorIntensity);
+                        
+                        // Apply rhythmic pattern effects (they add additional triggers)
+                        processStutter(mouseX, mouseY, lastColorIntensity, triggerFunc);
+                        processPolyrhythm(mouseX, mouseY, lastColorIntensity, triggerFunc);
+                        
                         lastSoundTime = Date.now();
                     }
                 } else {
@@ -4219,9 +4952,18 @@
                         
                         // If fluid is flowing through this zone, trigger a note!
                         if (velocityMagnitude > 0.03) { // Lower threshold = more sensitive triggering!
-                            triggerColorVoice(zone.color, zone.x, zone.y, 0.2); // Slightly louder too!
+                            // Check which mode is active
+                            if (oramicsEffects.textureMode2.active) {
+                                triggerTextureSound2(zone.x, zone.y, 0.2);
+                            } else if (oramicsEffects.textureMode.active) {
+                                triggerTextureSound(zone.x, zone.y, 0.2);
+                            } else {
+                                triggerColorVoice(zone.color, zone.x, zone.y, 0.2);
+                            }
                             zone.lastTriggerTime = now;
-                            console.log('⊞ Sequencer triggered:', zone.color);
+                            const modeText = oramicsEffects.textureMode2.active ? 'texture2' : 
+                                           oramicsEffects.textureMode.active ? 'texture1' : zone.color;
+                            console.log('⊞ Sequencer triggered:', modeText);
                         }
                     });
                 } catch (e) {
