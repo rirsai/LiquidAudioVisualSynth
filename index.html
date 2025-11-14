@@ -2676,6 +2676,23 @@
             setTimeout(() => canvas.style.border = 'none', 500);
             console.log('📍 Added pending click - Total pending:', pendingClicks.length);
             
+            // SUPER SIMPLE TEST: Play a basic tone directly (bypasses all complex logic)
+            if (audioContext && audioContext.state === 'running') {
+                try {
+                    const testOsc = audioContext.createOscillator();
+                    const testGain = audioContext.createGain();
+                    testOsc.frequency.value = 440; // A note
+                    testGain.gain.value = 0.3;
+                    testOsc.connect(testGain);
+                    testGain.connect(audioContext.destination);
+                    testOsc.start(audioContext.currentTime);
+                    testOsc.stop(audioContext.currentTime + 0.2);
+                    console.log('🎵 Test tone played!');
+                } catch (e) {
+                    console.log('❌ Test tone failed:', e);
+                }
+            }
+            
             if (audioEnabled) {
                 createSplashSound(clickX, clickY);
                 console.log('🔊 createSplashSound called');
@@ -5097,10 +5114,8 @@
                     
                     velocity.swap();
                     
-                    // DISABLED: Color ink drop on click (keeping only velocity splash)
-                    // Clicks now only create velocity explosions, not color injection
-                    // Color injection happens only during mouse movement for more realistic effect
-                    /*
+                    // RE-ENABLED FOR iOS: Color ink drop on click
+                    // iOS needs more aggressive visual feedback
                     if (selectedColorIndex >= 0) {
                         const voice = colorVoices[selectedColorIndex];
                         
@@ -5127,7 +5142,6 @@
                         
                         colorBuffer.swap();
                     }
-                    */
                 });
                 pendingClicks = [];
             }
