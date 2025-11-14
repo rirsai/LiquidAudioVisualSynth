@@ -4905,12 +4905,39 @@
                 toggleBtn.addEventListener('click', function() {
                     console.log('🔘 Sound button clicked');
                     if (!audioEnabled) {
-                        initAudio();
-                        audioEnabled = true;
-                        this.textContent = 'Sound Off';
-                        audioPanel.classList.add('expanded');
-                        colorPalette.classList.add('visible');
-                        console.log('✓ Audio initialized, state:', audioContext ? audioContext.state : 'no context');
+                        try {
+                            initAudio();
+                            // Don't set audioEnabled here - let initAudio() set it
+                            this.textContent = 'Sound Off';
+                            audioPanel.classList.add('expanded');
+                            colorPalette.classList.add('visible');
+                            
+                            // iOS CRITICAL: Auto-select first color (Grey) on mobile
+                            if ('ontouchstart' in window) {
+                                setTimeout(() => {
+                                    selectedColorIndex = 0; // Select Grey automatically
+                                    const firstSwatch = document.querySelector('.color-swatch');
+                                    if (firstSwatch) {
+                                        firstSwatch.classList.add('selected');
+                                    }
+                                    console.log('✓ Auto-selected color 0 (Grey) for mobile');
+                                }, 50);
+                            }
+                            
+                            // iOS CRITICAL: Show diagnostic
+                            setTimeout(() => {
+                                if (audioContext) {
+                                    alert('Audio OK!\nState: ' + audioContext.state + '\nEnabled: ' + audioEnabled + '\nColor: ' + selectedColorIndex);
+                                } else {
+                                    alert('AUDIO FAILED!\nContext is null!');
+                                }
+                            }, 200);
+                            
+                            console.log('✓ Audio initialized, state:', audioContext ? audioContext.state : 'no context');
+                        } catch (e) {
+                            alert('Audio init error: ' + e.message);
+                            console.error('Audio init failed:', e);
+                        }
                     } else {
                         audioEnabled = false;
                         if (audioContext) audioContext.close();
