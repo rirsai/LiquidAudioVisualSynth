@@ -2614,39 +2614,33 @@
 
         let lastTouchSoundTime = 0;
         
+        let lastTouchMoveTime = 0;
+        
         canvas.addEventListener('touchmove', (e) => {
             e.preventDefault();
             if (e.touches.length > 0) {
                 const rect = canvas.getBoundingClientRect();
-                mouseX = e.touches[0].clientX / rect.width;
-                mouseY = 1.0 - e.touches[0].clientY / rect.height;
+                const newX = e.touches[0].clientX / rect.width;
+                const newY = 1.0 - e.touches[0].clientY / rect.height;
                 
-                // REMOVED: Don't add to pendingClicks on every touchmove
-                // touchmove is like mousemove (hover) NOT like clicks!
-                // Let the render loop handle continuous painting via deltaX/deltaY
+                // Update mouse position (for deltaX/deltaY in render loop)
+                mouseX = newX;
+                mouseY = newY;
                 
-                // Removed sound triggering here too - let render loop handle it
+                // Throttled splat injection (every 50ms) to avoid spam
+                const now = Date.now();
+                if (now - lastTouchMoveTime > 50) {
+                    pendingClicks.push({ x: mouseX, y: mouseY });
+                    lastTouchMoveTime = now;
+                    console.log('💧 Touch move splat added');
+                }
             }
         }, { passive: false });
         
-        // TEST: Comprehensive diagnostic on first touch
-        let touchTestDone = false;
+        // Diagnostic removed - audio working!
         
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
-            
-            // ONE-TIME TEST: Show diagnostic info on first touch
-            if (!touchTestDone) {
-                touchTestDone = true;
-                const diagnostics = 
-                    'Touch detected!\n' +
-                    'Audio enabled: ' + audioEnabled + '\n' +
-                    'Audio context: ' + (audioContext ? audioContext.state : 'null') + '\n' +
-                    'Selected color: ' + selectedColorIndex + '\n' +
-                    'GL context: ' + (gl ? 'OK' : 'MISSING') + '\n' +
-                    'Render running: ' + (renderFrameCount > 0);
-                alert(diagnostics);
-            }
             
             if (e.touches.length === 0) return; // Safety check
             
@@ -2666,40 +2660,23 @@
             
             pendingClicks.push({ x: clickX, y: clickY });
             
-            // DIAGNOSTIC: SUPER OBVIOUS visual confirmation
-            canvas.style.border = '10px solid lime';
-            canvas.style.backgroundColor = 'rgba(255,0,0,0.3)'; // Red tint
-            setTimeout(() => {
-                canvas.style.border = 'none';
-                canvas.style.backgroundColor = 'transparent';
-            }, 1000);
-            console.log('📍 Added pending click - Total pending:', pendingClicks.length);
-            console.log('📍 Position:', clickX.toFixed(3), clickY.toFixed(3));
+            console.log('📍 Touch start at:', clickX.toFixed(3), clickY.toFixed(3));
             
-            // SUPER SIMPLE TEST: Play a basic tone directly (bypasses all complex logic)
-            // This tone should be LOUD and OBVIOUS
+            // Simple test beep (quieter now that audio works)
             if (audioContext && audioContext.state === 'running') {
                 try {
                     const testOsc = audioContext.createOscillator();
                     const testGain = audioContext.createGain();
-                    testOsc.frequency.value = 880; // High A note (more noticeable)
-                    testGain.gain.value = 0.5; // LOUDER
+                    testOsc.frequency.value = 440; 
+                    testGain.gain.value = 0.1; // Much quieter
                     testOsc.connect(testGain);
                     testGain.connect(audioContext.destination);
                     testOsc.start(audioContext.currentTime);
-                    testOsc.stop(audioContext.currentTime + 0.5); // Longer beep
-                    console.log('🎵 Test tone played at 880Hz for 0.5s!');
-                    
-                    // Also try to use masterGain if it exists
-                    if (masterGain) {
-                        console.log('✓ masterGain exists, value:', masterGain.gain.value);
-                    }
+                    testOsc.stop(audioContext.currentTime + 0.1); // Shorter
+                    console.log('🎵 Test beep');
                 } catch (e) {
                     console.log('❌ Test tone failed:', e);
-                    alert('Audio error: ' + e.message);
                 }
-            } else {
-                alert('Audio context problem! State: ' + (audioContext ? audioContext.state : 'null'));
             }
             
             if (audioEnabled) {
