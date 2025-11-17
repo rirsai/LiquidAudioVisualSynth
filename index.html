@@ -6,7 +6,7 @@
     <title>Daphne - Oramics Fluid Synth</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
@@ -454,51 +454,45 @@
         }
         
         #aboutContent {
-            padding: 60px 80px;
+            padding: 60px 0;
             color: white;
-            font-family: 'IBM Plex Mono', 'Courier New', monospace;
-            max-width: 800px;
             opacity: 0;
             transition: opacity 0.3s 0.2s;
+            display: grid;
+            grid-template-columns: 1fr 0.8fr 1fr 1fr 1fr 1fr 1fr;
+            gap: 0;
+            width: 100%;
         }
         
         #aboutContainer.open #aboutContent {
             opacity: 1;
         }
         
-        #aboutContent h2 {
-            font-size: 32px;
-            margin-bottom: 5px;
-            font-weight: normal;
+        .content-section {
+            display: contents;
         }
         
-        #aboutContent h3 {
-            font-size: 24px;
-            margin-top: 50px;
-            margin-bottom: 5px;
-            font-weight: normal;
-        }
-        
-        #aboutContent .subtitle {
-            font-size: 14px;
-            color: rgba(255, 255, 255, 0.6);
-            margin-bottom: 30px;
-            font-style: italic;
-        }
-        
-        #aboutContent p {
-            font-size: 16px;
-            line-height: 1.8;
-            margin-bottom: 20px;
-            color: rgba(255, 255, 255, 0.9);
-        }
-        
-        #aboutContent .quote {
-            font-style: italic;
+        .content-title {
+            grid-column: 2;
+            font-family: 'IBM Plex Mono', 'Courier New', monospace;
+            font-size: 13pt;
+            font-weight: 400;
             color: rgba(255, 255, 255, 0.8);
-            border-left: 2px solid rgba(255, 255, 255, 0.3);
-            padding-left: 25px;
-            margin: 30px 0;
+            padding-top: 0;
+            line-height: 1.4;
+        }
+        
+        .content-text {
+            grid-column: 3 / 7;
+            font-family: 'Lora', 'Georgia', serif;
+            font-size: 27pt;
+            line-height: 1.5;
+            color: white;
+            margin-bottom: 50px;
+        }
+        
+        .content-text.italic {
+            font-style: italic;
         }
         
         /* Mobile adjustments for about section */
@@ -519,20 +513,21 @@
             }
             
             #aboutContent {
-                padding: 40px 30px;
+                padding: 40px 20px;
+                grid-template-columns: 0.5fr 1fr 2fr 0.5fr;
+                gap: 10px;
             }
             
-            #aboutContent h2 {
-                font-size: 24px;
+            .content-title {
+                grid-column: 2;
+                font-size: 11pt;
             }
             
-            #aboutContent h3 {
-                font-size: 20px;
-            }
-            
-            #aboutContent p {
-                font-size: 14px;
-                line-height: 1.6;
+            .content-text {
+                grid-column: 3;
+                font-size: 18pt;
+                line-height: 1.4;
+                margin-bottom: 35px;
             }
         }
     </style>
@@ -551,17 +546,20 @@
         <button id="aboutToggle">Daphne v.0</button>
         <div id="aboutPanel">
             <div id="aboutContent">
-                <h2>New Atlantis</h2>
-                <p class="subtitle">by Francis Bacon, 1626</p>
+                <div class="content-section">
+                    <div class="content-title">New Atlantis<br>by Francis Bacon,<br>1626</div>
+                    <div class="content-text italic">"We have also sound-houses, where we practice and demonstrate all sounds and their generation. We have harmonies, which you have not, of quarter-sounds and lesser slides of sounds. Divers instruments of music likewise to you unknown, some sweeter than any you have, together with bells and rings that are dainty and sweet. We represent small sounds as great and deep, likewise great sounds extenuate and sharp; we make divers tremblings and warblings of sounds, which in their original are entire. We represent and imitate all articulate sounds and letters, and the voices and notes of beasts and birds. We have certain helps which set to the ear do further the hearing greatly. We also have divers strange and artificial echoes, reflecting the voice many times, and as it were tossing it, and some that give back the voice louder than it came, some shriller and some deeper; yea, some rendering the voice differing in the letters or articulate sound from that they receive. We have also means to convey sounds in trunks and pipes, in strange lines and distances."</div>
+                </div>
                 
-                <p class="quote">We have also sound-houses, where we practice and demonstrate all sounds and their generation. We have harmonies, which you have not, of quarter-sounds and lesser slides of sounds. Divers instruments of music likewise to you unknown, some sweeter than any you have, together with bells and rings that are dainty and sweet. We represent small sounds as great and deep, likewise great sounds extenuate and sharp; we make divers tremblings and warblings of sounds, which in their original are entire. We represent and imitate all articulate sounds and letters, and the voices and notes of beasts and birds. We have certain helps which set to the ear do further the hearing greatly. We also have divers strange and artificial echoes, reflecting the voice many times, and as it were tossing it, and some that give back the voice louder than it came, some shriller and some deeper; yea, some rendering the voice differing in the letters or articulate sound from that they receive. We have also means to convey sounds in trunks and pipes, in strange lines and distances.</p>
+                <div class="content-section">
+                    <div class="content-title">Daphne Oram<br>1925-2023</div>
+                    <div class="content-text">Daphne Oram (1925-2003) was a pioneer in the formation of electronic music, co-founding the BBC Radiophonic Workshop in 1958 before establishing her own studio in Kent to pursue a more radical vision. Her experimental practice centered on a conviction: "I want machines rather like computers to be an extension of the arm of the composer." She developed Oramics, a system where music was literally drawn—hand-painted waveforms and patterns on 35mm film strips, read photoelectrically to generate sound. Each parameter of composition—pitch, timbre, vibrato—could be defined and revised through marks that could be erased and redrawn. For Oram, this wasn't merely technical innovation but philosophical: the hand's presence in the sonic process mattered. She believed that "music should be a projection of a thought process in the mind of a human being," a continuous act where drawing and composing were inseparable.</div>
+                </div>
                 
-                <h3>Daphne Oram</h3>
-                <p class="subtitle">1925-2023</p>
-                
-                <p>Daphne Oram (1925-2003) was a pioneer in the formation of electronic music, co-founding the BBC Radiophonic Workshop in 1958. She invented Oramics, a technique where sound is created by drawing directly onto film strips - visual patterns become audible waveforms.</p>
-                
-                <p>This instrument is inspired by her radical approach: painting becomes sound, gesture becomes music, and the visual becomes sonic.</p>
+                <div class="content-section">
+                    <div class="content-title">Daphne v.0</div>
+                    <div class="content-text">Daphne v.0 is a tribute to Oram's ideas and explorations. A gestural instrument where movement generates sound and image—the hand's motion becomes both the score and the performance. Daphne v.0 is an exploration of real-time synthesis, examining how digital systems might extend the connections between hand, mind, vision, and sound. It's an experiment in creating ephemeral sonic soundscapes where gesture is composition, each movement a thought made audible.</div>
+                </div>
             </div>
         </div>
     </div>
