@@ -6,7 +6,8 @@
     <title>Daphne - Oramics Fluid Synth</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Lora:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://use.typekit.net/aal6qxu.css">
     <style>
         body {
             margin: 0;
@@ -419,6 +420,12 @@
             overflow-x: hidden;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        
+        #aboutPanel::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
         }
         
         #aboutToggle {
@@ -459,7 +466,7 @@
             opacity: 0;
             transition: opacity 0.3s 0.2s;
             display: grid;
-            grid-template-columns: 1fr 0.8fr 1fr 1fr 1fr 1fr 1fr;
+            grid-template-columns: 1fr 0.8fr 0.5fr 1fr 1fr 1fr 1fr 1fr;
             gap: 0;
             width: 100%;
         }
@@ -475,20 +482,21 @@
         .content-title {
             grid-column: 2;
             font-family: 'IBM Plex Mono', 'Courier New', monospace;
-            font-size: 13pt;
+            font-size: 11px;
             font-weight: 400;
             color: rgba(255, 255, 255, 0.8);
-            padding-top: 0;
+            padding-top: 4px;
             line-height: 1.4;
         }
         
         .content-text {
-            grid-column: 3 / 7;
-            font-family: 'Lora', 'Georgia', serif;
-            font-size: 27pt;
+            grid-column: 4 / 8;
+            font-family: 'minion-variable-concept', 'Minion Pro', 'Georgia', serif;
+            font-size: 17pt;
             line-height: 1.5;
             color: white;
             margin-bottom: 50px;
+            font-weight: 400;
         }
         
         .content-text.italic {
@@ -520,12 +528,12 @@
             
             .content-title {
                 grid-column: 2;
-                font-size: 11pt;
+                font-size: 9px;
             }
             
             .content-text {
                 grid-column: 3;
-                font-size: 18pt;
+                font-size: 14px;
                 line-height: 1.4;
                 margin-bottom: 35px;
             }
