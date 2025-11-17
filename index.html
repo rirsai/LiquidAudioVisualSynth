@@ -24,7 +24,8 @@
             height: 100vh;
             /* Prevent touch highlighting and scrolling */
             -webkit-tap-highlight-color: transparent;
-            touch-action: none;
+            /* iOS: Allow ALL touch actions - don't block anything */
+            touch-action: auto !important;
             /* Ensure canvas is touchable */
             pointer-events: auto;
             position: absolute;
@@ -2646,6 +2647,16 @@
             }
         };
         
+        // SIMPLE TEST: Just detect touchmove, any touch at all
+        let simpleTouchMoveCount = 0;
+        canvas.addEventListener('touchmove', (e) => {
+            simpleTouchMoveCount++;
+            console.log('🟣 SIMPLE touchmove #' + simpleTouchMoveCount);
+            // CYAN flash for ANY touchmove detection
+            document.body.style.backgroundColor = 'rgba(0,255,255,0.8)'; // CYAN
+            setTimeout(() => document.body.style.backgroundColor = '#000', 200);
+        }, { passive: false, capture: true }); // Use capture phase
+        
         // Add touchmove listener to CANVAS
         canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
         console.log('✓ touchmove listener added to canvas');
@@ -2661,6 +2672,13 @@
         
         canvas.addEventListener('touchstart', (e) => {
             e.preventDefault();
+            e.stopPropagation();
+            
+            console.log('🟢 TOUCHSTART fired!');
+            
+            // VISUAL: Orange flash for touchstart
+            document.body.style.backgroundColor = 'rgba(255,165,0,0.7)'; // ORANGE
+            setTimeout(() => document.body.style.backgroundColor = '#000', 400);
             
             if (e.touches.length === 0) return; // Safety check
             
@@ -2672,6 +2690,8 @@
             }
             
             isMouseDown = true; // Set for sustained interactions
+            console.log('👆 isMouseDown = true');
+            
             const rect = canvas.getBoundingClientRect();
             const clickX = e.touches[0].clientX / rect.width;
             const clickY = 1.0 - e.touches[0].clientY / rect.height;
