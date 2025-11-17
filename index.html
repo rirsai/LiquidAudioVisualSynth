@@ -1059,130 +1059,6 @@
                 palette.appendChild(btn);
             });
             
-            // Add loop recording section
-            const loopDivider = document.createElement('div');
-            loopDivider.className = 'glitch-divider';
-            palette.appendChild(loopDivider);
-            
-            // Loop Record button
-            const loopBtn = document.createElement('button');
-            loopBtn.id = 'loopRecordBtn';
-            loopBtn.className = 'beat-btn';
-            loopBtn.innerHTML = '⭕';  // Circle for record
-            loopBtn.title = 'Loop Record - Record and loop your painting';
-            loopBtn.addEventListener('click', toggleLoopRecording);
-            palette.appendChild(loopBtn);
-            
-            // Loop Clear button
-            const clearBtn = document.createElement('button');
-            clearBtn.id = 'loopClearBtn';
-            clearBtn.className = 'beat-btn';
-            clearBtn.innerHTML = '✖';
-            clearBtn.title = 'Clear Loop';
-            clearBtn.addEventListener('click', clearLoop);
-            palette.appendChild(clearBtn);
-        }
-        
-        // ===== LOOP RECORDING FUNCTIONS =====
-        
-        function toggleLoopRecording() {
-            const btn = document.getElementById('loopRecordBtn');
-            
-            if (!isRecording && !isLoopPlaying) {
-                // Start recording
-                isRecording = true;
-                recordedLoop = [];
-                recordingStartTime = Date.now();
-                btn.classList.add('active');
-                btn.innerHTML = '⏺';  // Solid record dot
-                console.log('🔴 Started loop recording (max 20s or 200 events)');
-            } else if (isRecording) {
-                // Stop recording and start playback
-                isRecording = false;
-                loopDuration = (Date.now() - recordingStartTime) / 1000;  // in seconds
-                btn.innerHTML = '▶';  // Play symbol
-                
-                if (recordedLoop.length > 0) {
-                    startLoopPlayback();
-                    console.log(`✓ Loop recorded: ${recordedLoop.length} events, ${loopDuration.toFixed(2)}s`);
-                } else {
-                    btn.classList.remove('active');
-                    btn.innerHTML = '⭕';
-                    console.log('⚠️ No events recorded');
-                }
-            }
-        }
-        
-        function startLoopPlayback() {
-            if (recordedLoop.length === 0 || !audioEnabled) return;
-            
-            isLoopPlaying = true;
-            let loopStartTime = Date.now() / 1000;
-            
-            // Schedule all events in the loop
-            function playLoop() {
-                const now = Date.now() / 1000;
-                const elapsedTime = (now - loopStartTime) % loopDuration;
-                
-                // Play events that should fire in this iteration
-                recordedLoop.forEach(event => {
-                    const eventTime = event.time;
-                    const timeDiff = Math.abs(elapsedTime - eventTime);
-                    
-                    // Trigger events within a 60ms window
-                    if (timeDiff < 0.06) {
-                        // Restore color and trigger sound
-                        const oldColor = selectedColorIndex;
-                        selectedColorIndex = event.colorIndex;
-                        
-                        if (oramicsEffects.textureMode2.active) {
-                            triggerTextureSound2(event.x, event.y, event.intensity);
-                        } else if (oramicsEffects.textureMode.active) {
-                            triggerTextureSound(event.x, event.y, event.intensity);
-                        } else if (selectedColorIndex >= 0 && selectedColorIndex < colorVoices.length) {
-                            const wrappedTrigger = () => {
-                                triggerColorVoice(selectedColorIndex, event.x, event.y, event.intensity);
-                            };
-                            
-                            // Apply rhythmic effects if active
-                            if (oramicsEffects.stutter.active) {
-                                processStutter(event.x, event.y, event.intensity, wrappedTrigger);
-                            } else if (oramicsEffects.polyrhythm.active) {
-                                processPolyrhythm(event.x, event.y, event.intensity, wrappedTrigger);
-                            } else {
-                                wrappedTrigger();
-                            }
-                        }
-                        
-                        // Restore previous color
-                        selectedColorIndex = oldColor;
-                    }
-                });
-            }
-            
-            // Play loop every 100ms (reduced CPU load)
-            loopPlaybackInterval = setInterval(playLoop, 100);
-        }
-        
-        function stopLoopPlayback() {
-            isLoopPlaying = false;
-            if (loopPlaybackInterval) {
-                clearInterval(loopPlaybackInterval);
-                loopPlaybackInterval = null;
-            }
-        }
-        
-        function clearLoop() {
-            stopLoopPlayback();
-            isRecording = false;
-            recordedLoop = [];
-            loopDuration = 0;
-            
-            const btn = document.getElementById('loopRecordBtn');
-            btn.classList.remove('active');
-            btn.innerHTML = '⭕';
-            
-            console.log('✓ Loop cleared');
         }
         
         function toggleOramics(key, btn) {
@@ -2921,15 +2797,6 @@
         let echoTone, echoGain, echoFilter;
         let lastColorIntensity = 0;
         
-        // ===== LOOP RECORDING SYSTEM =====
-        let isRecording = false;
-        let recordedLoop = [];  // Array of {time, x, y, colorIndex, intensity}
-        let recordingStartTime = 0;
-        let loopDuration = 0;
-        let loopPlaybackInterval = null;
-        let isLoopPlaying = false;
-        const MAX_LOOP_EVENTS = 200;  // Prevent memory overflow
-        const MAX_LOOP_DURATION = 20;  // Max 20 seconds
         
         async function initAudio() {
             console.log('🎵 initAudio() called');
@@ -5059,11 +4926,6 @@
             polyrhythmTimers.forEach(timer => clearTimeout(timer));
             polyrhythmTimers = [];
             
-            // Stop and clear loop recording
-            stopLoopPlayback();
-            recordedLoop = [];
-            isRecording = false;
-            
             // Close audio context if it exists
             if (audioContext && audioContext.state !== 'closed') {
                 try {
@@ -5541,25 +5403,6 @@
                             triggerFunc = (x, y, intensity) => triggerTextureSound(x, y, intensity);
                         } else {
                             triggerFunc = (x, y, intensity) => triggerColorVoice(selectedColorIndex, x, y, intensity);
-                        }
-                        
-                        // ===== LOOP RECORDING: Capture events =====
-                        if (isRecording && selectedColorIndex >= 0) {
-                            const eventTime = (Date.now() - recordingStartTime) / 1000;  // time in seconds
-                            
-                            // Auto-stop if limits reached
-                            if (recordedLoop.length >= MAX_LOOP_EVENTS || eventTime >= MAX_LOOP_DURATION) {
-                                console.log('⚠️ Loop limit reached, auto-stopping');
-                                toggleLoopRecording();  // Stop and start playback
-                            } else {
-                                recordedLoop.push({
-                                    time: eventTime,
-                                    x: mouseX,
-                                    y: mouseY,
-                                    colorIndex: selectedColorIndex,
-                                    intensity: lastColorIntensity
-                                });
-                            }
                         }
                         
                         // Trigger main sound
