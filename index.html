@@ -2632,7 +2632,11 @@
                 if (now - lastTouchMoveTime > 50) {
                     pendingClicks.push({ x: mouseX, y: mouseY });
                     lastTouchMoveTime = now;
-                    console.log('💧 Touch move splat added');
+                    console.log('💧 Touch move splat added at', mouseX.toFixed(3), mouseY.toFixed(3), '- Total now:', pendingClicks.length);
+                    
+                    // FORCE visible feedback for iOS debugging
+                    document.body.style.backgroundColor = 'rgba(255,0,255,0.3)'; // Magenta flash
+                    setTimeout(() => document.body.style.backgroundColor = '#000', 200);
                 }
             }
         }, { passive: false });
@@ -4983,11 +4987,17 @@
         });
 
         let renderFrameCount = 0;
+        let lastRenderLog = 0;
         
         function render(time) {
             renderFrameCount++;
             if (renderFrameCount === 1) {
-                console.log('✓ Render loop started');
+                console.log('✅ RENDER LOOP STARTED');
+            }
+            
+            // Log every 60 frames (once per second at 60fps)
+            if (renderFrameCount % 60 === 0) {
+                console.log('🔄 Render frame', renderFrameCount, '- pendingClicks:', pendingClicks.length);
             }
             
             time *= 0.001;
