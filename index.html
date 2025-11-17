@@ -1095,7 +1095,7 @@
                 recordingStartTime = Date.now();
                 btn.classList.add('active');
                 btn.innerHTML = '⏺';  // Solid record dot
-                console.log('🔴 Started loop recording');
+                console.log('🔴 Started loop recording (max 20s or 200 events)');
             } else if (isRecording) {
                 // Stop recording and start playback
                 isRecording = false;
@@ -1129,8 +1129,8 @@
                     const eventTime = event.time;
                     const timeDiff = Math.abs(elapsedTime - eventTime);
                     
-                    // Trigger events within a 50ms window
-                    if (timeDiff < 0.05) {
+                    // Trigger events within a 60ms window
+                    if (timeDiff < 0.06) {
                         // Restore color and trigger sound
                         const oldColor = selectedColorIndex;
                         selectedColorIndex = event.colorIndex;
@@ -1160,8 +1160,8 @@
                 });
             }
             
-            // Play loop every 50ms
-            loopPlaybackInterval = setInterval(playLoop, 50);
+            // Play loop every 100ms (reduced CPU load)
+            loopPlaybackInterval = setInterval(playLoop, 100);
         }
         
         function stopLoopPlayback() {
@@ -2928,6 +2928,8 @@
         let loopDuration = 0;
         let loopPlaybackInterval = null;
         let isLoopPlaying = false;
+        const MAX_LOOP_EVENTS = 200;  // Prevent memory overflow
+        const MAX_LOOP_DURATION = 20;  // Max 20 seconds
         
         async function initAudio() {
             console.log('🎵 initAudio() called');
@@ -3835,15 +3837,15 @@
             let pianoHarmonics = [];
             if (sound.isPiano) {
                 // Piano uses multiple harmonics with individual decay rates
-                // Higher harmonics decay faster (realistic piano physics)
-                for (let h = 2; h <= 6; h++) {
+                // Reduced from 6 to 3 for performance
+                for (let h = 2; h <= 4; h++) {
                     const harmOsc = audioContext.createOscillator();
                     harmOsc.type = 'sine';
                     harmOsc.frequency.value = baseFreq * h;
                     
                     const harmEnv = audioContext.createGain();
                     harmEnv.gain.value = 0;
-                    const harmVolume = baseVolume / (h * h); // Higher harmonics are quieter
+                    const harmVolume = baseVolume / (h * 1.5); // Higher harmonics are quieter
                     harmEnv.gain.linearRampToValueAtTime(harmVolume, now + 0.005);
                     // Higher harmonics decay faster
                     const harmDecay = sound.pianoDecay / (1 + (h - 1) * 0.3);
@@ -3857,29 +3859,22 @@
             let bellPartials = [];
             if (sound.isBell) {
                 // Bells have inharmonic partials (not integer multiples of fundamental)
-                // Common bell ratios: 2.0, 3.0, 4.4, 5.4 (not 2, 3, 4, 5)
-                const bellRatios = [1.0, 2.0, 2.8, 4.1, 5.4, 6.8, 8.2];
+                // Reduced to 4 partials for performance (was 7)
+                const bellRatios = [1.0, 2.0, 3.2, 5.4];
                 
                 for (let i = 0; i < bellRatios.length; i++) {
                     const partialOsc = audioContext.createOscillator();
                     partialOsc.type = 'sine';
                     partialOsc.frequency.value = baseFreq * bellRatios[i];
                     
-                    // Add shimmer (vibrato) to each partial
-                    if (sound.bellShimmer) {
-                        const shimmerLFO = audioContext.createOscillator();
-                        shimmerLFO.frequency.value = sound.shimmerRate + Math.random() * 0.5;
-                        const shimmerGain = audioContext.createGain();
-                        shimmerGain.gain.value = sound.shimmerDepth;
-                        shimmerLFO.connect(shimmerGain);
-                        shimmerGain.connect(partialOsc.frequency);
-                        shimmerLFO.start(now);
-                        shimmerLFO.stop(now + sound.bellDecay);
+                    // Shimmer via detune instead of LFO (much more efficient!)
+                    if (sound.bellShimmer && i > 0) {
+                        partialOsc.detune.value = Math.sin(now * sound.shimmerRate + i) * sound.shimmerDepth;
                     }
                     
                     const partialEnv = audioContext.createGain();
                     partialEnv.gain.value = 0;
-                    const partialVolume = baseVolume / (i + 1); // Higher partials are quieter
+                    const partialVolume = baseVolume / (i + 1.5); // Higher partials are quieter
                     partialEnv.gain.linearRampToValueAtTime(partialVolume, now + 0.01);
                     partialEnv.gain.exponentialRampToValueAtTime(0.001, now + sound.bellDecay);
                     
@@ -5551,7 +5546,7 @@
                     
                     lastColorIntensity = lastColorIntensity * 0.99 + injectionStrength;
                     
-                    if (audioEnabled && Date.now() - lastSoundTime > 80) {
+                    if (audioEnabled && Date.now() - lastSoundTime > 120) {
                         // Determine which trigger function to use
                         let triggerFunc;
                         if (oramicsEffects.textureMode2.active) {
@@ -5565,13 +5560,20 @@
                         // ===== LOOP RECORDING: Capture events =====
                         if (isRecording && selectedColorIndex >= 0) {
                             const eventTime = (Date.now() - recordingStartTime) / 1000;  // time in seconds
-                            recordedLoop.push({
-                                time: eventTime,
-                                x: mouseX,
-                                y: mouseY,
-                                colorIndex: selectedColorIndex,
-                                intensity: lastColorIntensity
-                            });
+                            
+                            // Auto-stop if limits reached
+                            if (recordedLoop.length >= MAX_LOOP_EVENTS || eventTime >= MAX_LOOP_DURATION) {
+                                console.log('⚠️ Loop limit reached, auto-stopping');
+                                toggleLoopRecording();  // Stop and start playback
+                            } else {
+                                recordedLoop.push({
+                                    time: eventTime,
+                                    x: mouseX,
+                                    y: mouseY,
+                                    colorIndex: selectedColorIndex,
+                                    intensity: lastColorIntensity
+                                });
+                            }
                         }
                         
                         // Trigger main sound
