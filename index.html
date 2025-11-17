@@ -3534,17 +3534,6 @@
             }
             bitCrusher.curve = curve;
             
-            // Sample rate reduction effect (via rapid modulation)
-            const sampleRateHz = 4000 + x * 12000; // X position affects sample rate
-            const tremolo = audioContext.createOscillator();
-            tremolo.frequency.value = sampleRateHz;
-            tremolo.type = 'square';
-            
-            const tremoloGain = audioContext.createGain();
-            tremoloGain.gain.value = 0.5;
-            
-            tremolo.connect(tremoloGain);
-            
             const velocityBoost = Math.min(currentPaintingVelocity / 0.8, 1.5);
             const volume = 0.06 * intensity * (0.6 + velocityBoost * 0.4); // Reduced from 0.1 to 0.06
             
@@ -3562,11 +3551,9 @@
             panner.connect(masterGain);
             
             osc.start(now);
-            tremolo.start(now);
             osc.stop(now + duration);
-            tremolo.stop(now + duration);
             
-            console.log('🎮 Bit-Crush:', bits, 'bits @', sampleRateHz.toFixed(0), 'Hz');
+            console.log('🎮 Bit-Crush:', bits, 'bits');
         }
         
         /**
@@ -3610,7 +3597,6 @@
             
             // Create parallel routing for formants
             const merger = audioContext.createChannelMerger(numFormants);
-            const splitter = audioContext.createChannelSplitter(numFormants);
             
             formantFilters.forEach((filter, i) => {
                 noise.connect(filter);
