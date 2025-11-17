@@ -383,6 +383,131 @@
                 font-size: 14px;
             }
         }
+        
+        /* ===== ABOUT SECTION ===== */
+        #aboutContainer {
+            position: fixed;
+            top: 0;
+            right: 0;
+            height: 100vh;
+            z-index: 1000;
+            display: flex;
+            flex-direction: row-reverse;
+        }
+        
+        #aboutToggle {
+            width: 50px;
+            height: 120px;
+            background: rgba(0, 0, 0, 0.9);
+            border: none;
+            color: white;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            cursor: pointer;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            transform: rotate(180deg);
+            padding: 10px 0;
+            letter-spacing: 1px;
+            transition: background 0.3s;
+            pointer-events: auto;
+        }
+        
+        #aboutToggle:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        #aboutPanel {
+            width: 0;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            overflow-x: hidden;
+            overflow-y: auto;
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        #aboutPanel.open {
+            width: 66.666vw; /* 2/3 of viewport */
+        }
+        
+        #aboutContent {
+            padding: 60px 80px;
+            color: white;
+            font-family: 'Georgia', serif;
+            max-width: 800px;
+            opacity: 0;
+            transition: opacity 0.3s 0.2s;
+        }
+        
+        #aboutPanel.open #aboutContent {
+            opacity: 1;
+        }
+        
+        #aboutContent h2 {
+            font-size: 32px;
+            margin-bottom: 5px;
+            font-weight: normal;
+        }
+        
+        #aboutContent h3 {
+            font-size: 24px;
+            margin-top: 50px;
+            margin-bottom: 5px;
+            font-weight: normal;
+        }
+        
+        #aboutContent .subtitle {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+            margin-bottom: 30px;
+            font-style: italic;
+        }
+        
+        #aboutContent p {
+            font-size: 16px;
+            line-height: 1.8;
+            margin-bottom: 20px;
+            color: rgba(255, 255, 255, 0.9);
+        }
+        
+        #aboutContent .quote {
+            font-style: italic;
+            color: rgba(255, 255, 255, 0.8);
+            border-left: 2px solid rgba(255, 255, 255, 0.3);
+            padding-left: 25px;
+            margin: 30px 0;
+        }
+        
+        /* Mobile adjustments for about section */
+        @media (max-width: 768px) {
+            #aboutToggle {
+                width: 40px;
+                height: 100px;
+                font-size: 10px;
+            }
+            
+            #aboutPanel.open {
+                width: 85vw;
+            }
+            
+            #aboutContent {
+                padding: 40px 30px;
+            }
+            
+            #aboutContent h2 {
+                font-size: 24px;
+            }
+            
+            #aboutContent h3 {
+                font-size: 20px;
+            }
+            
+            #aboutContent p {
+                font-size: 14px;
+                line-height: 1.6;
+            }
+        }
     </style>
 </head>
 <body>
@@ -391,6 +516,26 @@
         <div id="audioPanel">
             <button id="toggleAudio">Sound On</button>
             <div id="colorPalette"></div>
+        </div>
+    </div>
+    
+    <!-- About Section -->
+    <div id="aboutContainer">
+        <button id="aboutToggle">Daphne v.1</button>
+        <div id="aboutPanel">
+            <div id="aboutContent">
+                <h2>New Atlantis</h2>
+                <p class="subtitle">by Francis Bacon, 1626</p>
+                
+                <p class="quote">We have also sound-houses, where we practice and demonstrate all sounds and their generation. We have harmonies, which you have not, of quarter-sounds and lesser slides of sounds. Divers instruments of music likewise to you unknown, some sweeter than any you have, together with bells and rings that are dainty and sweet. We represent small sounds as great and deep, likewise great sounds extenuate and sharp; we make divers tremblings and warblings of sounds, which in their original are entire. We represent and imitate all articulate sounds and letters, and the voices and notes of beasts and birds. We have certain helps which set to the ear do further the hearing greatly. We also have divers strange and artificial echoes, reflecting the voice many times, and as it were tossing it, and some that give back the voice louder than it came, some shriller and some deeper; yea, some rendering the voice differing in the letters or articulate sound from that they receive. We have also means to convey sounds in trunks and pipes, in strange lines and distances.</p>
+                
+                <h3>Daphne Oram</h3>
+                <p class="subtitle">1925-2023</p>
+                
+                <p>Daphne Oram (1925-2003) was a pioneer in the formation of electronic music, co-founding the BBC Radiophonic Workshop in 1958. She invented Oramics, a technique where sound is created by drawing directly onto film strips - visual patterns become audible waveforms.</p>
+                
+                <p>This instrument is inspired by her radical approach: painting becomes sound, gesture becomes music, and the visual becomes sonic.</p>
+            </div>
         </div>
     </div>
     
@@ -4962,6 +5107,23 @@
             initGlitchPanel();
             initBeatPanel();
             initOramicsPanel();
+            
+            // Initialize About Panel
+            const aboutToggle = document.getElementById('aboutToggle');
+            const aboutPanel = document.getElementById('aboutPanel');
+            
+            if (aboutToggle && aboutPanel) {
+                aboutToggle.addEventListener('click', () => {
+                    aboutPanel.classList.toggle('open');
+                    console.log('ℹ️ About panel toggled');
+                });
+                
+                // Also support touch events for mobile
+                aboutToggle.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    aboutPanel.classList.toggle('open');
+                });
+            }
             
             const toggleBtn = document.getElementById('toggleAudio');
             const audioPanel = document.getElementById('audioPanel');
